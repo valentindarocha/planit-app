@@ -3,7 +3,9 @@
 import Link from "next/link";
 import { useState } from "react";
 
-const navLinks = [
+type NavLink = { label: string; href: string; scroll?: boolean };
+
+const navLinks: NavLink[] = [
   { label: "Inicio", href: "/" },
   { label: "Servicios", href: "/servicios" },
   { label: "Nosotros", href: "/nosotros" },
