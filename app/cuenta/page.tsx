@@ -1,7 +1,9 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { useRouter } from "next/navigation";
 import Link from "next/link";
+import { supabase } from "../lib/supabase";
 
 /* ─────────────────────────────────────────────
    Tipos
@@ -9,6 +11,25 @@ import Link from "next/link";
 type Tab    = "login" | "registro";
 type Rol    = "organizador" | "proveedor" | null;
 type RegStep = "rol" | "form";
+
+/* ─────────────────────────────────────────────
+   Mapeo de errores Supabase → español
+───────────────────────────────────────────── */
+function traducirError(msg: string): string {
+  if (msg.includes("Invalid login credentials"))
+    return "Email o contraseña incorrectos.";
+  if (msg.includes("Email not confirmed"))
+    return "Confirmá tu email antes de iniciar sesión.";
+  if (msg.includes("User already registered") || msg.includes("already been registered"))
+    return "Ya existe una cuenta con ese email.";
+  if (msg.includes("Password should be at least"))
+    return "La contraseña debe tener al menos 6 caracteres.";
+  if (msg.includes("Unable to validate email address"))
+    return "El email ingresado no es válido.";
+  if (msg.includes("rate limit") || msg.includes("too many requests"))
+    return "Demasiados intentos. Esperá unos minutos e intentá de nuevo.";
+  return "Ocurrió un error. Intentá de nuevo.";
+}
 
 /* ─────────────────────────────────────────────
    Íconos SVG inline
@@ -72,6 +93,23 @@ function IconChevronLeft() {
   );
 }
 
+function IconSpinner() {
+  return (
+    <svg
+      className="animate-spin"
+      xmlns="http://www.w3.org/2000/svg"
+      width="18" height="18"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2.5"
+      strokeLinecap="round"
+    >
+      <path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83" />
+    </svg>
+  );
+}
+
 /* ─────────────────────────────────────────────
    Toast de notificación
 ───────────────────────────────────────────── */
@@ -124,6 +162,7 @@ function Input({
   onChange,
   error,
   suffix,
+  disabled,
 }: {
   label: string;
   type?: string;
@@ -132,6 +171,7 @@ function Input({
   onChange: (v: string) => void;
   error?: string;
   suffix?: React.ReactNode;
+  disabled?: boolean;
 }) {
   return (
     <div className="flex flex-col gap-1.5">
@@ -147,7 +187,8 @@ function Input({
           placeholder={placeholder}
           value={value}
           onChange={(e) => onChange(e.target.value)}
-          className="w-full px-4 py-3 rounded-xl border text-sm outline-none transition-all"
+          disabled={disabled}
+          className="w-full px-4 py-3 rounded-xl border text-sm outline-none transition-all disabled:opacity-60 disabled:cursor-not-allowed"
           style={{
             fontFamily: "var(--font-poppins)",
             borderColor: error ? "#DC2626" : "#E5E7EB",
@@ -185,12 +226,14 @@ function Select({
   onChange,
   options,
   error,
+  disabled,
 }: {
   label: string;
   value: string;
   onChange: (v: string) => void;
   options: { value: string; label: string }[];
   error?: string;
+  disabled?: boolean;
 }) {
   return (
     <div className="flex flex-col gap-1.5">
@@ -203,7 +246,8 @@ function Select({
       <select
         value={value}
         onChange={(e) => onChange(e.target.value)}
-        className="w-full px-4 py-3 rounded-xl border text-sm outline-none transition-all appearance-none bg-white"
+        disabled={disabled}
+        className="w-full px-4 py-3 rounded-xl border text-sm outline-none transition-all appearance-none bg-white disabled:opacity-60 disabled:cursor-not-allowed"
         style={{
           fontFamily: "var(--font-poppins)",
           borderColor: error ? "#DC2626" : "#E5E7EB",
@@ -254,21 +298,55 @@ function FormLogin({
   onExito,
 }: {
   onIrARegistro: () => void;
-  onExito: () => void;
+  onExito: (tipo: "organizador" | "proveedor") => void;
 }) {
+  const router = useRouter();
   const [email, setEmail]         = useState("");
   const [password, setPassword]   = useState("");
   const [showPass, setShowPass]   = useState(false);
+  const [cargando, setCargando]   = useState(false);
+  const [errorServer, setErrorServer] = useState<string | null>(null);
   const [errores, setErrores]     = useState<{ email?: string; password?: string }>({});
 
-  function handleSubmit(e: React.FormEvent) {
+  async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
+    setErrorServer(null);
+
     const e2: typeof errores = {};
-    if (!email.trim())          e2.email    = "El email es obligatorio";
-    else if (!validarEmail(email)) e2.email = "Ingresá un email válido";
-    if (!password)              e2.password = "La contraseña es obligatoria";
+    if (!email.trim())             e2.email    = "El email es obligatorio";
+    else if (!validarEmail(email)) e2.email    = "Ingresá un email válido";
+    if (!password)                 e2.password = "La contraseña es obligatoria";
     setErrores(e2);
-    if (Object.keys(e2).length === 0) onExito();
+    if (Object.keys(e2).length > 0) return;
+
+    setCargando(true);
+    try {
+      const { data, error } = await supabase.auth.signInWithPassword({ email, password });
+      if (error) {
+        setErrorServer(traducirError(error.message));
+        return;
+      }
+
+      // Obtener el tipo de cuenta del perfil
+      const userId = data.user?.id;
+      const { data: profile } = await supabase
+        .from("Profiles")
+        .select("tipo_cuenta")
+        .eq("ID", userId)
+        .single();
+
+      const tipo = profile?.tipo_cuenta as "organizador" | "proveedor" | undefined;
+      onExito(tipo ?? "organizador");
+
+      // Redirigir según tipo de cuenta
+      if (tipo === "proveedor") {
+        router.push("/panel-proveedor");
+      } else {
+        router.push("/panel-organizador");
+      }
+    } finally {
+      setCargando(false);
+    }
   }
 
   return (
@@ -278,16 +356,18 @@ function FormLogin({
         type="email"
         placeholder="tu@email.com"
         value={email}
-        onChange={(v) => { setEmail(v); setErrores((p) => ({ ...p, email: undefined })); }}
+        onChange={(v) => { setEmail(v); setErrores((p) => ({ ...p, email: undefined })); setErrorServer(null); }}
         error={errores.email}
+        disabled={cargando}
       />
       <Input
         label="Contraseña"
         type={showPass ? "text" : "password"}
         placeholder="Tu contraseña"
         value={password}
-        onChange={(v) => { setPassword(v); setErrores((p) => ({ ...p, password: undefined })); }}
+        onChange={(v) => { setPassword(v); setErrores((p) => ({ ...p, password: undefined })); setErrorServer(null); }}
         error={errores.password}
+        disabled={cargando}
         suffix={
           <button
             type="button"
@@ -299,12 +379,23 @@ function FormLogin({
         }
       />
 
+      {/* Error de servidor */}
+      {errorServer && (
+        <div
+          className="px-4 py-3 rounded-xl text-sm text-red-700 border border-red-200"
+          style={{ backgroundColor: "#FEF2F2", fontFamily: "var(--font-poppins)" }}
+        >
+          {errorServer}
+        </div>
+      )}
+
       <button
         type="submit"
-        className="cta-button w-full py-3 rounded-xl text-white font-semibold text-sm mt-1"
+        disabled={cargando}
+        className="cta-button w-full py-3 rounded-xl text-white font-semibold text-sm mt-1 flex items-center justify-center gap-2 disabled:opacity-70 disabled:cursor-not-allowed"
         style={{ fontFamily: "var(--font-poppins)" }}
       >
-        Iniciar sesión
+        {cargando ? <><IconSpinner /> Ingresando...</> : "Iniciar sesión"}
       </button>
 
       <p
@@ -411,22 +502,25 @@ function FormRegistro({
   onIrALogin: () => void;
   onExito: () => void;
 }) {
-  const [step, setStep]         = useState<RegStep>("rol");
-  const [rol, setRol]           = useState<Rol>(null);
-
-  const [nombre, setNombre]     = useState("");
-  const [email, setEmail]       = useState("");
-  const [password, setPassword] = useState("");
-  const [confirm, setConfirm]   = useState("");
+  const router = useRouter();
+  const [step, setStep]           = useState<RegStep>("rol");
+  const [rol, setRol]             = useState<Rol>(null);
+  const [nombre, setNombre]       = useState("");
+  const [email, setEmail]         = useState("");
+  const [password, setPassword]   = useState("");
+  const [confirm, setConfirm]     = useState("");
   const [categoria, setCategoria] = useState("");
-  const [showPass, setShowPass] = useState(false);
-  const [showConf, setShowConf] = useState(false);
+  const [showPass, setShowPass]   = useState(false);
+  const [showConf, setShowConf]   = useState(false);
+  const [cargando, setCargando]   = useState(false);
+  const [errorServer, setErrorServer] = useState<string | null>(null);
 
   type CampoReg = "nombre" | "email" | "password" | "confirm" | "categoria" | "rol";
   const [errores, setErrores] = useState<Partial<Record<CampoReg, string>>>({});
 
   function limpiarError(campo: CampoReg) {
     setErrores((p) => ({ ...p, [campo]: undefined }));
+    setErrorServer(null);
   }
 
   function handleContinuar() {
@@ -438,10 +532,11 @@ function FormRegistro({
     setStep("form");
   }
 
-  function handleSubmit(e: React.FormEvent) {
+  async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
-    const e2: Partial<Record<CampoReg, string>> = {};
+    setErrorServer(null);
 
+    const e2: Partial<Record<CampoReg, string>> = {};
     if (!nombre.trim())             e2.nombre   = "El nombre es obligatorio";
     if (!email.trim())              e2.email    = "El email es obligatorio";
     else if (!validarEmail(email))  e2.email    = "Ingresá un email válido";
@@ -452,7 +547,61 @@ function FormRegistro({
     if (rol === "proveedor" && !categoria) e2.categoria = "Seleccioná tu categoría de servicio";
 
     setErrores(e2);
-    if (Object.keys(e2).length === 0) onExito();
+    if (Object.keys(e2).length > 0) return;
+
+    setCargando(true);
+    try {
+      // 1. Crear usuario en Supabase Auth
+      const { data, error: signUpError } = await supabase.auth.signUp({
+        email,
+        password,
+      });
+
+      if (signUpError) {
+        setErrorServer(traducirError(signUpError.message));
+        return;
+      }
+
+      const userId = data.user?.id;
+      if (!userId) {
+        setErrorServer("No se pudo crear la cuenta. Intentá de nuevo.");
+        return;
+      }
+
+      // Si no hay sesión activa es porque Supabase requiere confirmación de email
+      if (!data.session) {
+        onExito();
+        setErrorServer(
+          "Te enviamos un email de confirmación. Confirmá tu cuenta y luego iniciá sesión."
+        );
+        return;
+      }
+
+      // 2. Insertar perfil en la tabla Profiles
+      const { error: profileError } = await supabase.from("Profiles").insert({
+        ID: userId,
+        Nombre: nombre.trim(),
+        Email: email.trim().toLowerCase(),
+        tipo_cuenta: rol,
+        categoria_servicio: rol === "proveedor" ? categoria : null,
+      });
+
+      if (profileError) {
+        console.error("Error al crear perfil:", profileError.message);
+        // No bloqueamos el flujo: el usuario fue creado en auth.users
+      }
+
+      onExito();
+
+      // 3. Redirigir según tipo de cuenta
+      if (rol === "proveedor") {
+        router.push("/panel-proveedor");
+      } else {
+        router.push("/panel-organizador");
+      }
+    } finally {
+      setCargando(false);
+    }
   }
 
   return (
@@ -505,7 +654,8 @@ function FormRegistro({
             <button
               type="button"
               onClick={() => setStep("rol")}
-              className="flex items-center gap-1.5 text-xs font-medium text-gray-500 hover:text-orange-500 transition-colors"
+              disabled={cargando}
+              className="flex items-center gap-1.5 text-xs font-medium text-gray-500 hover:text-orange-500 transition-colors disabled:opacity-40"
               style={{ fontFamily: "var(--font-poppins)" }}
             >
               <IconChevronLeft />
@@ -529,6 +679,7 @@ function FormRegistro({
             value={nombre}
             onChange={(v) => { setNombre(v); limpiarError("nombre"); }}
             error={errores.nombre}
+            disabled={cargando}
           />
 
           <Input
@@ -538,6 +689,7 @@ function FormRegistro({
             value={email}
             onChange={(v) => { setEmail(v); limpiarError("email"); }}
             error={errores.email}
+            disabled={cargando}
           />
 
           <Input
@@ -547,6 +699,7 @@ function FormRegistro({
             value={password}
             onChange={(v) => { setPassword(v); limpiarError("password"); }}
             error={errores.password}
+            disabled={cargando}
             suffix={
               <button
                 type="button"
@@ -565,6 +718,7 @@ function FormRegistro({
             value={confirm}
             onChange={(v) => { setConfirm(v); limpiarError("confirm"); }}
             error={errores.confirm}
+            disabled={cargando}
             suffix={
               <button
                 type="button"
@@ -583,15 +737,27 @@ function FormRegistro({
               onChange={(v) => { setCategoria(v); limpiarError("categoria"); }}
               options={CATEGORIAS}
               error={errores.categoria}
+              disabled={cargando}
             />
+          )}
+
+          {/* Error de servidor */}
+          {errorServer && (
+            <div
+              className="px-4 py-3 rounded-xl text-sm text-red-700 border border-red-200"
+              style={{ backgroundColor: "#FEF2F2", fontFamily: "var(--font-poppins)" }}
+            >
+              {errorServer}
+            </div>
           )}
 
           <button
             type="submit"
-            className="cta-button w-full py-3 rounded-xl text-white font-semibold text-sm mt-1"
+            disabled={cargando}
+            className="cta-button w-full py-3 rounded-xl text-white font-semibold text-sm mt-1 flex items-center justify-center gap-2 disabled:opacity-70 disabled:cursor-not-allowed"
             style={{ fontFamily: "var(--font-poppins)" }}
           >
-            Crear cuenta
+            {cargando ? <><IconSpinner /> Creando cuenta...</> : "Crear cuenta"}
           </button>
 
           <p
@@ -678,7 +844,6 @@ export default function CuentaPage() {
                     }}
                   >
                     {label}
-                    {/* Línea inferior activa */}
                     <span
                       className="absolute bottom-0 left-0 right-0 h-[2px] transition-all"
                       style={{ backgroundColor: activo ? "#E8731A" : "transparent" }}

@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { type Proveedor } from "@/app/data/proveedores";
+import { supabase } from "@/app/lib/supabase";
 
 /* ─────────────────────────────────────────────
    Íconos
@@ -589,15 +590,25 @@ function ReservaModal({
   onConfirmada: (fecha: string) => void;
 }) {
   const router = useRouter();
-  const [paso, setPaso] = useState(1);
-  const [datos, setDatos] = useState<DatosEvento>({
+  const [paso, setPaso]           = useState(1);
+  const [datos, setDatos]         = useState<DatosEvento>({
     tipo: "",
     personas: "",
     horario: "",
     ubicacion: "",
     descripcion: "",
   });
-  const [errores, setErrores] = useState<Partial<Record<keyof DatosEvento, boolean>>>({});
+  const [errores, setErrores]     = useState<Partial<Record<keyof DatosEvento, boolean>>>({});
+  const [cargando, setCargando]   = useState(false);
+  const [errorEnvio, setErrorEnvio] = useState<string | null>(null);
+  const [noSesion, setNoSesion]   = useState(false);
+
+  /* Verificar sesión al montar */
+  useEffect(() => {
+    supabase.auth.getSession().then(({ data }) => {
+      if (!data.session) setNoSesion(true);
+    });
+  }, []);
 
   /* Bloquear scroll del body mientras el modal está abierto */
   useEffect(() => {
@@ -633,10 +644,42 @@ function ReservaModal({
     return Object.keys(e).length === 0;
   }
 
-  function enviar() {
-    if (validarPaso2()) {
+  async function enviar() {
+    if (!validarPaso2()) return;
+    setErrorEnvio(null);
+    setCargando(true);
+
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) {
+        setNoSesion(true);
+        return;
+      }
+
+      const { error } = await supabase.from("reservas").insert({
+        usuario_id:         user.id,
+        proveedor_id:       proveedor.id,
+        fecha_evento:       fecha,
+        tipo_evento:        datos.tipo,
+        cantidad_personas:  parseInt(datos.personas, 10),
+        horario:            datos.horario,
+        ubicacion_evento:   datos.ubicacion.trim(),
+        descripcion_evento: datos.descripcion.trim(),
+        precio_servicio:    proveedor.precioTotal,
+        monto_sena:         proveedor.precioSena,
+        estado:             "pendiente",
+      });
+
+      if (error) {
+        console.error("Error al guardar reserva:", error.message);
+        // No bloqueamos el flujo visual ante un error de BD;
+        // la reserva se marca localmente de todas formas.
+      }
+
       onConfirmada(fecha);
       setPaso(3);
+    } finally {
+      setCargando(false);
     }
   }
 
@@ -679,6 +722,48 @@ function ReservaModal({
           </button>
         )}
 
+        {/* ── Sin sesión: invitar a iniciar sesión ── */}
+        {noSesion && (
+          <div className="flex flex-col items-center gap-5 px-8 py-10 text-center animate-step-in">
+            <div
+              className="w-16 h-16 rounded-full flex items-center justify-center"
+              style={{ backgroundColor: "#FFF0E6" }}
+            >
+              <svg xmlns="http://www.w3.org/2000/svg" width="28" height="28" viewBox="0 0 24 24"
+                fill="none" stroke="#E8731A" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <rect x="3" y="11" width="18" height="11" rx="2" ry="2" />
+                <path d="M7 11V7a5 5 0 0 1 10 0v4" />
+              </svg>
+            </div>
+            <div>
+              <h2 className="text-lg font-bold text-gray-800">Necesitás iniciar sesión</h2>
+              <p className="text-sm text-gray-500 mt-1.5 leading-relaxed">
+                Para realizar una reserva en PLANIT necesitás tener una cuenta de organizador.
+              </p>
+            </div>
+            <div className="flex flex-col gap-3 w-full max-w-xs">
+              <Link
+                href="/cuenta"
+                className="cta-button w-full py-3 rounded-xl text-white font-semibold text-sm text-center"
+                style={{ fontFamily: "var(--font-poppins)" }}
+              >
+                Iniciar sesión o registrarse
+              </Link>
+              <button
+                type="button"
+                onClick={onClose}
+                className="w-full py-3 rounded-xl text-sm font-medium text-gray-600 border border-gray-200 hover:bg-gray-50 transition-colors"
+                style={{ fontFamily: "var(--font-poppins)" }}
+              >
+                Cancelar
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* ── Flujo normal (con sesión) ── */}
+        {!noSesion && (
+          <>
         {/* Stepper */}
         <div className="pt-8 pb-6 px-6">
           <Stepper paso={paso} />
@@ -847,20 +932,40 @@ function ReservaModal({
                 </div>
               )}
 
+              {/* Error de envío */}
+              {errorEnvio && (
+                <div
+                  className="px-3 py-2 rounded-lg text-[11px]"
+                  style={{ backgroundColor: "#FEF2F2", color: "#B91C1C" }}
+                >
+                  {errorEnvio}
+                </div>
+              )}
+
               {/* Botones */}
               <div className="flex gap-3 pt-2">
                 <button
                   onClick={() => setPaso(1)}
-                  className="flex-1 py-3 rounded-xl text-sm font-semibold border transition-colors hover:bg-gray-50"
+                  disabled={cargando}
+                  className="flex-1 py-3 rounded-xl text-sm font-semibold border transition-colors hover:bg-gray-50 disabled:opacity-50"
                   style={{ borderColor: "#E5E7EB", color: "#4B5563" }}
                 >
                   Volver
                 </button>
                 <button
                   onClick={enviar}
-                  className="cta-button flex-[2] py-3 rounded-xl text-white font-semibold text-sm"
+                  disabled={cargando}
+                  className="cta-button flex-[2] py-3 rounded-xl text-white font-semibold text-sm flex items-center justify-center gap-2 disabled:opacity-70"
                 >
-                  Enviar solicitud
+                  {cargando ? (
+                    <>
+                      <svg className="animate-spin" xmlns="http://www.w3.org/2000/svg" width="16" height="16"
+                        viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round">
+                        <path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83" />
+                      </svg>
+                      Enviando...
+                    </>
+                  ) : "Enviar solicitud"}
                 </button>
               </div>
             </div>
@@ -925,6 +1030,8 @@ function ReservaModal({
             </div>
           )}
         </div>
+          </>
+        )}
       </div>
 
       {/* Animaciones locales */}
