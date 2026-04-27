@@ -3,7 +3,9 @@
 import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
+import { useAuth } from "../contexts/AuthContext";
 import { supabase } from "../lib/supabase";
+import AvatarUpload from "../components/AvatarUpload";
 
 /* ─────────────────────────────────────────────
    Tipos
@@ -25,99 +27,31 @@ interface Reserva {
 }
 
 interface UserData {
-  nombre: string;
-  email: string;
-  telefono: string;
-  ubicacion: string;
+  nombre:     string;
+  email:      string;
   fotoPerfil: string;
+  telefono?:  string;
+  ubicacion?: string;
 }
 
 /* ─────────────────────────────────────────────
-   Datos simulados
+   Helpers de mapeo DB → UI
 ───────────────────────────────────────────── */
-const RESERVAS_INICIALES: Reserva[] = [
-  {
-    id: "r1",
-    proveedor: "DJ Matías López",
-    tipoServicio: "DJ",
-    inicial: "M",
-    fecha: "2026-05-15",
-    precio: "$180.000",
-    sena: "$36.000",
-    senaPagada: true,
-    estado: "confirmada",
-    mensajeProveedor:
-      "¡Confirmado! Ya agendé la fecha. Nos vemos el 15 de mayo. Cualquier consulta escribime.",
-  },
-  {
-    id: "r2",
-    proveedor: "Catering Palazzo",
-    tipoServicio: "Catering",
-    inicial: "P",
-    fecha: "2026-05-15",
-    precio: "$450.000",
-    sena: "$90.000",
-    senaPagada: true,
-    estado: "confirmada",
-    mensajeProveedor:
-      "¡Todo listo! Haremos una degustación previa la semana del 5 de mayo para aprobar el menú.",
-  },
-  {
-    id: "r3",
-    proveedor: "Foto+Video Nora",
-    tipoServicio: "Fotografía y Video",
-    inicial: "N",
-    fecha: "2026-05-15",
-    precio: "$250.000",
-    sena: "$50.000",
-    senaPagada: false,
-    estado: "pendiente",
-    mensajeProveedor:
-      "Recibí tu solicitud. Estoy revisando mi disponibilidad y te respondo en las próximas horas.",
-  },
-  {
-    id: "r4",
-    proveedor: "Banda Ritmo Vivo",
-    tipoServicio: "Banda en vivo",
-    inicial: "R",
-    fecha: "2026-07-20",
-    precio: "$120.000",
-    sena: "$24.000",
-    senaPagada: false,
-    estado: "cancelada",
-    mensajeProveedor:
-      "Lamentamos que hayas cancelado. Quedamos a disposición para futuros eventos.",
-  },
-  {
-    id: "r5",
-    proveedor: "Salón Villa Clara",
-    tipoServicio: "Lugar / Salón",
-    inicial: "V",
-    fecha: "2026-09-10",
-    precio: "$800.000",
-    sena: "$160.000",
-    senaPagada: false,
-    estado: "cancelada",
-    mensajeProveedor:
-      "Entendemos la cancelación. Si en el futuro necesitás el espacio, no dudes en contactarnos.",
-  },
-];
-
-const USUARIO_INICIAL: UserData = {
-  nombre: "Valentín Morales",
-  email: "valentin.morales@email.com",
-  telefono: "+54 9 11 4523-7891",
-  ubicacion: "Palermo, CABA",
-  fotoPerfil:
-    "https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=200&h=200&q=80&fit=crop&crop=face",
-};
-
-const FOTOS_PERFIL_POOL = [
-  "https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=200&h=200&q=80&fit=crop&crop=face",
-  "https://images.unsplash.com/photo-1500648767791-00dcc994a43e?w=200&h=200&q=80&fit=crop&crop=face",
-  "https://images.unsplash.com/photo-1539571696357-5a69c17a67c6?w=200&h=200&q=80&fit=crop&crop=face",
-  "https://images.unsplash.com/photo-1463453091185-61582044d556?w=200&h=200&q=80&fit=crop&crop=face",
-];
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function mapReservaDB(row: any, provNombre: string): Reserva {
+  return {
+    id:              row.id,
+    proveedor:       provNombre,
+    tipoServicio:    row.tipo_evento  ?? "–",
+    inicial:         provNombre[0]?.toUpperCase() ?? "P",
+    fecha:           row.fecha_evento ?? "",
+    precio:          row.precio_servicio ? `$${row.precio_servicio}` : "–",
+    sena:            row.monto_sena    ? `$${row.monto_sena}`    : "–",
+    senaPagada:      false,
+    estado:          (row.estado ?? "pendiente") as EstadoReserva,
+    mensajeProveedor: row.descripcion_evento ?? "",
+  };
+}
 
 const MESES = [
   "Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio",
@@ -809,10 +743,25 @@ function SeccionReservas({
         ))}
         {filtradas.length === 0 && (
           <div
-            className="col-span-2 bg-white rounded-2xl border border-gray-100 p-10 text-center text-sm text-gray-400"
+            className="col-span-2 bg-white rounded-2xl border border-gray-100 p-10 flex flex-col items-center gap-3 text-center"
             style={{ fontFamily: "var(--font-poppins)" }}
           >
-            No hay reservas en este estado.
+            <span className="text-3xl">📋</span>
+            <p className="text-sm font-semibold text-gray-700">
+              {filtro === "todas" ? "Todavía no tenés reservas" : `No hay reservas ${filtro === "confirmada" ? "confirmadas" : filtro === "pendiente" ? "pendientes" : "canceladas"}`}
+            </p>
+            <p className="text-xs text-gray-400">
+              {filtro === "todas" && "Explorá los servicios disponibles y reservá tu primer proveedor."}
+            </p>
+            {filtro === "todas" && (
+              <Link
+                href="/servicios"
+                className="mt-1 text-xs font-semibold px-4 py-2 rounded-xl"
+                style={{ backgroundColor: "#E8731A", color: "white" }}
+              >
+                Explorar servicios
+              </Link>
+            )}
           </div>
         )}
       </div>
@@ -832,23 +781,32 @@ function SeccionReservas({
    Sección — Mi perfil
 ───────────────────────────────────────────── */
 function SeccionPerfil({
-  foto,
-  onCambiarFoto,
   onToast,
+  initialData,
+  userId,
+  onAvatarUploaded,
 }: {
-  foto: string;
-  onCambiarFoto: () => void;
   onToast: (msg: string) => void;
+  initialData: UserData;
+  userId: string;
+  onAvatarUploaded: (url: string) => void;
 }) {
-  const [datos, setDatos] = useState<UserData>({ ...USUARIO_INICIAL });
+  const [datos, setDatos]     = useState<UserData>(initialData);
+  const [guardando, setGuardando] = useState(false);
 
   function actualizar<K extends keyof UserData>(k: K, v: UserData[K]) {
     setDatos((d) => ({ ...d, [k]: v }));
   }
 
-  function handleGuardar(e: React.FormEvent) {
+  async function handleGuardar(e: React.FormEvent) {
     e.preventDefault();
-    onToast("Perfil actualizado correctamente");
+    setGuardando(true);
+    const { error } = await supabase
+      .from("Profiles")
+      .update({ Nombre: datos.nombre })
+      .eq("ID", userId);
+    setGuardando(false);
+    onToast(error ? "Error al guardar. Intentá de nuevo." : "Perfil actualizado correctamente");
   }
 
   const inputCls =
@@ -873,22 +831,19 @@ function SeccionPerfil({
       >
         {/* Foto de perfil */}
         <div className="flex items-center gap-4 pb-5 border-b border-gray-100">
-          <FotoPerfilEditable
-            foto={foto}
+          <AvatarUpload
+            userId={userId}
+            currentUrl={datos.fotoPerfil ?? ""}
             nombre={datos.nombre}
             size={72}
-            onCambiar={onCambiarFoto}
+            onUploaded={(url) => {
+              actualizar("fotoPerfil", url);
+              onAvatarUploaded(url);
+            }}
           />
           <div>
             <p className="text-sm font-bold text-gray-800">{datos.nombre}</p>
-            <button
-              type="button"
-              onClick={onCambiarFoto}
-              className="text-xs font-semibold mt-1 hover:underline"
-              style={{ color: "#E8731A" }}
-            >
-              Cambiar foto de perfil
-            </button>
+            <p className="text-xs text-gray-400 mt-0.5">Hacé clic en la foto para cambiarla</p>
           </div>
         </div>
 
@@ -949,9 +904,10 @@ function SeccionPerfil({
         <div className="pt-2 border-t border-gray-100 flex justify-end">
           <button
             type="submit"
-            className="cta-button px-8 py-3 rounded-xl text-white font-semibold text-sm"
+            disabled={guardando}
+            className="cta-button px-8 py-3 rounded-xl text-white font-semibold text-sm disabled:opacity-70"
           >
-            Guardar cambios
+            {guardando ? "Guardando..." : "Guardar cambios"}
           </button>
         </div>
       </form>
@@ -1229,41 +1185,102 @@ const NAV_ITEMS: { id: Seccion; label: string; icon: React.ReactNode }[] = [
    Página principal del panel
 ───────────────────────────────────────────── */
 export default function PanelOrganizadorPage() {
-  const router = useRouter();
-  const [seccion, setSeccion]       = useState<Seccion>("resumen");
-  const [reservas, setReservas]     = useState<Reserva[]>(RESERVAS_INICIALES);
-  const [toast, setToast]           = useState<{ mensaje: string } | null>(null);
-  const [fotoPerfil, setFotoPerfil] = useState(USUARIO_INICIAL.fotoPerfil);
-  const [fotoIdx, setFotoIdx]       = useState(0);
+  const router                       = useRouter();
+  const { user, loading, signOut }   = useAuth();
+  const [seccion, setSeccion]        = useState<Seccion>("resumen");
+  const [reservas, setReservas]      = useState<Reserva[]>([]);
+  const [toast, setToast]            = useState<{ mensaje: string } | null>(null);
+  const [fotoPerfil, setFotoPerfil]  = useState("");
+  const [profileData, setProfileData] = useState<UserData | null>(null);
+  const [dbLoading, setDbLoading]    = useState(true);
 
-  /* ── Protección de ruta: redirigir si no hay sesión ── */
+  /* ── Protección de ruta ── */
   useEffect(() => {
-    supabase.auth.getSession().then(({ data }) => {
-      if (!data.session) {
-        router.replace("/cuenta");
-      }
-    });
-  }, [router]);
+    if (!loading && !user) router.replace("/cuenta");
+  }, [user, loading, router]);
 
+  /* ── Carga de datos reales ── */
+  useEffect(() => {
+    if (!user) return;
+
+    async function fetchData() {
+      setDbLoading(true);
+      try {
+        // 1. Perfil del usuario
+        const { data: profile } = await supabase
+          .from("Profiles")
+          .select("Nombre, Email, foto_perfil")
+          .eq("ID", user!.id)
+          .single();
+
+        const ud: UserData = {
+          nombre:     profile?.Nombre     ?? user!.email ?? "",
+          email:      profile?.Email      ?? user!.email ?? "",
+          fotoPerfil: profile?.foto_perfil ?? "",
+        };
+        setProfileData(ud);
+        setFotoPerfil(ud.fotoPerfil);
+
+        // 2. Reservas del usuario
+        const { data: reservasDB } = await supabase
+          .from("reservas")
+          .select("*")
+          .eq("usuario_id", user!.id)
+          .order("fecha_evento", { ascending: true });
+
+        if (reservasDB && reservasDB.length > 0) {
+          // Nombres de proveedores (lookup por IDs únicos)
+          const provIds = [...new Set(reservasDB.map((r) => r.proveedor_id).filter(Boolean))];
+          const provMap = new Map<string, string>();
+          if (provIds.length > 0) {
+            const { data: provs } = await supabase
+              .from("Profiles")
+              .select("ID, Nombre")
+              .in("ID", provIds);
+            provs?.forEach((p) => provMap.set(p.ID, p.Nombre ?? "Proveedor"));
+          }
+          setReservas(reservasDB.map((r) => mapReservaDB(r, provMap.get(r.proveedor_id) ?? "Proveedor")));
+        } else {
+          setReservas([]);
+        }
+      } finally {
+        setDbLoading(false);
+      }
+    }
+
+    fetchData();
+  }, [user]);
+
+  /* ── Loading global ── */
+  if (loading || dbLoading) {
+    return (
+      <div
+        className="min-h-screen pt-[50px] flex items-center justify-center"
+        style={{ backgroundColor: "#F3F4F6" }}
+      >
+        <div className="flex flex-col items-center gap-3">
+          <div className="w-10 h-10 border-4 border-orange-200 border-t-orange-500 rounded-full animate-spin" />
+          <p className="text-sm text-gray-500 font-medium" style={{ fontFamily: "var(--font-poppins)" }}>
+            Cargando tu panel...
+          </p>
+        </div>
+      </div>
+    );
+  }
+  if (!user) return null;
+
+  const nombreDisplay   = profileData?.nombre || user.email || "Vos";
+  const primerNombre    = nombreDisplay.split(" ")[0];
   const pendientesCount = reservas.filter((r) => r.estado === "pendiente").length;
 
-  async function handleSignOut() {
-    await supabase.auth.signOut();
-    router.push("/cuenta");
-  }
-
-  function handleCancelar(id: string) {
-    setReservas((prev) =>
-      prev.map((r) => (r.id === id ? { ...r, estado: "cancelada" } : r)),
-    );
+  async function handleCancelar(id: string) {
+    await supabase.from("reservas").update({ estado: "cancelada" }).eq("id", id);
+    setReservas((prev) => prev.map((r) => (r.id === id ? { ...r, estado: "cancelada" } : r)));
     setToast({ mensaje: "Reserva cancelada correctamente" });
   }
 
   function handleCambiarFoto() {
-    const nextIdx = (fotoIdx + 1) % FOTOS_PERFIL_POOL.length;
-    setFotoIdx(nextIdx);
-    setFotoPerfil(FOTOS_PERFIL_POOL[nextIdx]);
-    setToast({ mensaje: "Foto de perfil actualizada" });
+    setSeccion("perfil");
   }
 
   return (
@@ -1281,12 +1298,12 @@ export default function PanelOrganizadorPage() {
               <div className="flex items-center gap-3">
                 <FotoPerfilEditable
                   foto={fotoPerfil}
-                  nombre="Valentín Morales"
+                  nombre={nombreDisplay}
                   size={40}
                   onCambiar={handleCambiarFoto}
                 />
                 <div className="min-w-0">
-                  <p className="text-sm font-bold text-gray-800 truncate">Valentín Morales</p>
+                  <p className="text-sm font-bold text-gray-800 truncate">{nombreDisplay}</p>
                   <p className="text-[10px] text-gray-400">Organizador</p>
                 </div>
               </div>
@@ -1324,7 +1341,7 @@ export default function PanelOrganizadorPage() {
             {/* Cerrar sesión */}
             <div className="p-3 border-t border-gray-100">
               <button
-                onClick={handleSignOut}
+                onClick={signOut}
                 className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium text-gray-500 hover:bg-gray-50 hover:text-gray-700 transition-colors text-left"
               >
                 <IconLogOut />
@@ -1376,19 +1393,19 @@ export default function PanelOrganizadorPage() {
             <div className="flex items-center gap-4">
               <FotoPerfilEditable
                 foto={fotoPerfil}
-                nombre="Valentín Morales"
+                nombre={nombreDisplay}
                 size={44}
                 onCambiar={handleCambiarFoto}
               />
               <div>
                 <h1 className="text-lg font-bold text-gray-800">
-                  Hola, Valentín 👋
+                  Hola, {primerNombre} 👋
                 </h1>
                 <p className="text-xs text-gray-500 mt-0.5">Panel de organizador</p>
               </div>
             </div>
             <button
-              onClick={handleSignOut}
+              onClick={signOut}
               className="flex items-center gap-2 text-xs font-medium text-gray-500 hover:text-gray-700 transition-colors px-3 py-2 rounded-xl hover:bg-gray-100"
             >
               <IconLogOut />
@@ -1407,11 +1424,12 @@ export default function PanelOrganizadorPage() {
             {seccion === "calendario" && (
               <SeccionCalendario reservas={reservas} />
             )}
-            {seccion === "perfil" && (
+            {seccion === "perfil" && profileData && (
               <SeccionPerfil
-                foto={fotoPerfil}
-                onCambiarFoto={handleCambiarFoto}
                 onToast={(msg) => setToast({ mensaje: msg })}
+                initialData={profileData}
+                userId={user.id}
+                onAvatarUploaded={(url) => setFotoPerfil(url)}
               />
             )}
           </main>

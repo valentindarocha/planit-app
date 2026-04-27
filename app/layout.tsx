@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { Inter, Poppins } from "next/font/google";
 import "./globals.css";
 import Navbar from "./components/Navbar";
+import { AuthProvider } from "./contexts/AuthContext";
 
 const inter = Inter({
   subsets: ["latin"],
@@ -27,8 +28,10 @@ export default function RootLayout({
   return (
     <html lang="es" className={`${inter.variable} ${poppins.variable} h-full`}>
       <body className="min-h-full flex flex-col antialiased font-sans">
-        <Navbar />
-        {children}
+        <AuthProvider>
+          <Navbar />
+          {children}
+        </AuthProvider>
       </body>
     </html>
   );

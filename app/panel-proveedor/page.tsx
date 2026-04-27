@@ -3,7 +3,9 @@
 import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
+import { useAuth } from "../contexts/AuthContext";
 import { supabase } from "../lib/supabase";
+import AvatarUpload from "../components/AvatarUpload";
 
 /* ─────────────────────────────────────────────
    Tipos
@@ -23,98 +25,38 @@ interface Solicitud {
 }
 
 interface PerfilData {
-  nombre: string;
-  descripcion: string;
-  categoria: string;
-  precioTotal: string;
-  precioSena: string;
-  ubicacion: string;
+  nombre:       string;
+  descripcion?: string;
+  categoria:    string;
+  precioTotal:  string;
+  precioSena:   string;
+  ubicacion?:   string;
   especialidades: string[];
+  fotoPerfil?:  string;
 }
 
 /* ─────────────────────────────────────────────
-   Datos simulados
+   Helpers de mapeo DB → UI
 ───────────────────────────────────────────── */
-const SOLICITUDES_INICIALES: Solicitud[] = [
-  {
-    id: "s1",
-    cliente: "Lucía Fernández",
-    tipoEvento: "Boda",
-    fecha: "2026-05-15",
-    servicio: "DJ para boda completa (8 hs)",
-    precio: "$180.000",
-    mensaje: "Hola Matías! Estamos organizando nuestra boda para mayo. Somos unos 120 invitados, el lugar es un salón en Palermo. Nos gustaría charlar sobre el repertorio, la iluminación y si es posible agregar un micrófono para los discursos.",
-    estado: "pendiente",
-  },
-  {
-    id: "s2",
-    cliente: "Carlos Medina",
-    tipoEvento: "Evento empresarial",
-    fecha: "2026-05-22",
-    servicio: "DJ para cena corporativa (4 hs)",
-    precio: "$95.000",
-    mensaje: "Necesitamos música ambiente para una cena de empresa de 60 personas. El perfil sobrio y elegante es clave, nada muy electrónico. El evento es en un hotel en Puerto Madero.",
-    estado: "pendiente",
-  },
-  {
-    id: "s3",
-    cliente: "Valentina Ruiz",
-    tipoEvento: "Fiesta de XV",
-    fecha: "2026-06-07",
-    servicio: "DJ para XV años con iluminación LED",
-    precio: "$150.000",
-    mensaje: "Es la fiesta de XV de mi hija, queremos que sea súper especial. Electro pop y reggaeton para los más jóvenes, algo más movido a partir de la medianoche. El salón está en Lanús.",
-    estado: "confirmada",
-  },
-  {
-    id: "s4",
-    cliente: "Tomás Guerrero",
-    tipoEvento: "Cumpleaños",
-    fecha: "2026-04-26",
-    servicio: "DJ para cumpleaños de 50 años",
-    precio: "$85.000",
-    mensaje: "Fiesta de cumpleaños de mi papá, ambiente clásico años 80-90. Somos unas 70 personas en casa particular en Belgrano. Quizás necesitamos el equipo de sonido incluido.",
-    estado: "rechazada",
-  },
-  {
-    id: "s5",
-    cliente: "Marina Solís",
-    tipoEvento: "Aniversario",
-    fecha: "2026-05-30",
-    servicio: "DJ para cena de aniversario (3 hs)",
-    precio: "$70.000",
-    mensaje: "Cena romántica de aniversario para unas 40 personas en una terraza en Recoleta. Necesitamos música suave, con posibilidad de una sorpresa musical en algún momento de la noche.",
-    estado: "pendiente",
-  },
-];
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function mapSolicitudDB(row: any, clienteNombre: string): Solicitud {
+  return {
+    id:         row.id,
+    cliente:    clienteNombre,
+    tipoEvento: row.tipo_evento         ?? "–",
+    fecha:      row.fecha_evento        ?? "",
+    servicio:   row.descripcion_evento  ?? "–",
+    precio:     row.precio_servicio     ? `$${row.precio_servicio}` : "–",
+    mensaje:    row.descripcion_evento  ?? "–",
+    estado:     (row.estado ?? "pendiente") as EstadoSolicitud,
+  };
+}
 
-const PERFIL_INICIAL: PerfilData = {
-  nombre: "DJ Matías López",
-  descripcion:
-    "DJ profesional con más de 10 años de experiencia en bodas, fiestas de XV y eventos corporativos. Equipo de sonido e iluminación profesional incluido. Atención personalizada y playlist adaptada a cada evento.",
-  categoria: "djs",
-  precioTotal: "180.000",
-  precioSena: "36.000",
-  ubicacion: "CABA y GBA",
-  especialidades: ["Bodas", "Fiestas de XV", "Fiestas privadas"],
-};
+const FECHAS_BLOQUEADAS_INICIALES: string[] = [];
 
-const FECHAS_BLOQUEADAS_INICIALES = ["2026-05-10", "2026-05-20"];
+const FOTOS_INICIALES_PROVEEDOR: string[] = [];
 
-const FOTOS_INICIALES_PROVEEDOR = [
-  "https://images.unsplash.com/photo-1516280440614-37939bbacd81?w=400&q=80",
-  "https://images.unsplash.com/photo-1571266752580-d48ef5dd0843?w=400&q=80",
-  "https://images.unsplash.com/photo-1470229722913-7c0e2dbbafd3?w=400&q=80",
-  "https://images.unsplash.com/photo-1429962714451-bb934ecdc4ec?w=400&q=80",
-];
-
-const FOTOS_NUEVAS_POOL = [
-  "https://images.unsplash.com/photo-1496024840928-4c417adf211d?w=400&q=80",
-  "https://images.unsplash.com/photo-1540575467063-178a50c2df87?w=400&q=80",
-  "https://images.unsplash.com/photo-1524368535928-5b5e00ddc76b?w=400&q=80",
-  "https://images.unsplash.com/photo-1598387993441-a364f854cfds?w=400&q=80",
-  "https://images.unsplash.com/photo-1511671782779-c97d3d27a1d4?w=400&q=80",
-];
+const FOTOS_NUEVAS_POOL: string[] = [];
 
 const TODAS_ESPECIALIDADES = [
   "Bodas",
@@ -985,9 +927,20 @@ function SeccionCalendario({
 /* ─────────────────────────────────────────────
    Sección — Perfil editable
 ───────────────────────────────────────────── */
-function SeccionPerfil({ onToast }: { onToast: (msg: string) => void }) {
-  const [perfil, setPerfil] = useState<PerfilData>({ ...PERFIL_INICIAL });
-  const [fotos, setFotos]   = useState<string[]>(FOTOS_INICIALES_PROVEEDOR);
+function SeccionPerfil({
+  onToast,
+  initialPerfil,
+  userId,
+  onAvatarUploaded,
+}: {
+  onToast: (msg: string) => void;
+  initialPerfil: PerfilData;
+  userId: string;
+  onAvatarUploaded: (url: string) => void;
+}) {
+  const [perfil, setPerfil]     = useState<PerfilData>(initialPerfil);
+  const [fotos, setFotos]       = useState<string[]>(FOTOS_INICIALES_PROVEEDOR);
+  const [guardando, setGuardando] = useState(false);
 
   function actualizar<K extends keyof PerfilData>(k: K, v: PerfilData[K]) {
     setPerfil((p) => ({ ...p, [k]: v }));
@@ -1007,14 +960,30 @@ function SeccionPerfil({ onToast }: { onToast: (msg: string) => void }) {
   }
 
   function agregarFoto() {
+    if (FOTOS_NUEVAS_POOL.length === 0) {
+      onToast("Subida de fotos no disponible en este momento");
+      return;
+    }
     const nueva = FOTOS_NUEVAS_POOL[fotos.length % FOTOS_NUEVAS_POOL.length];
     setFotos((prev) => [...prev, nueva]);
     onToast("Foto agregada correctamente");
   }
 
-  function handleGuardar(e: React.FormEvent) {
+  async function handleGuardar(e: React.FormEvent) {
     e.preventDefault();
-    onToast("Perfil actualizado correctamente");
+    setGuardando(true);
+    const { error } = await supabase
+      .from("Profiles")
+      .update({
+        Nombre:            perfil.nombre,
+        categoria_servicio: perfil.categoria,
+        precio_servicio:   perfil.precioTotal,
+        monto_sena:        perfil.precioSena,
+        especialidades:    perfil.especialidades,
+      })
+      .eq("ID", userId);
+    setGuardando(false);
+    onToast(error ? "Error al guardar. Intentá de nuevo." : "Perfil actualizado correctamente");
   }
 
   const inputCls =
@@ -1038,6 +1007,24 @@ function SeccionPerfil({ onToast }: { onToast: (msg: string) => void }) {
         className="bg-white rounded-2xl border border-gray-100 p-6 shadow-sm flex flex-col gap-5"
         style={{ fontFamily: "var(--font-poppins)" }}
       >
+        {/* Foto de perfil */}
+        <div className="flex items-center gap-4 pb-5 border-b border-gray-100">
+          <AvatarUpload
+            userId={userId}
+            currentUrl={perfil.fotoPerfil ?? ""}
+            nombre={perfil.nombre}
+            size={72}
+            onUploaded={(url) => {
+              actualizar("fotoPerfil", url);
+              onAvatarUploaded(url);
+            }}
+          />
+          <div>
+            <p className="text-sm font-bold text-gray-800">{perfil.nombre}</p>
+            <p className="text-xs text-gray-400 mt-0.5">Hacé clic en la foto para cambiarla</p>
+          </div>
+        </div>
+
         {/* Nombre */}
         <div className="flex flex-col gap-1.5">
           <label className="text-xs font-semibold text-gray-700">Nombre / Marca</label>
@@ -1162,9 +1149,10 @@ function SeccionPerfil({ onToast }: { onToast: (msg: string) => void }) {
         <div className="pt-2 border-t border-gray-100 flex justify-end">
           <button
             type="submit"
-            className="cta-button px-8 py-3 rounded-xl text-white font-semibold text-sm"
+            disabled={guardando}
+            className="cta-button px-8 py-3 rounded-xl text-white font-semibold text-sm disabled:opacity-70"
           >
-            Guardar cambios
+            {guardando ? "Guardando..." : "Guardar cambios"}
           </button>
         </div>
       </form>
@@ -1244,22 +1232,76 @@ const NAV_ITEMS: { id: Seccion; label: string; icon: React.ReactNode }[] = [
    Página principal del panel
 ───────────────────────────────────────────── */
 export default function PanelProveedorPage() {
-  const router = useRouter();
+  const router                    = useRouter();
+  const { user, loading, signOut } = useAuth();
   const [seccion, setSeccion]     = useState<Seccion>("resumen");
-  const [solicitudes, setSolicitudes] = useState<Solicitud[]>(SOLICITUDES_INICIALES);
+  const [solicitudes, setSolicitudes] = useState<Solicitud[]>([]);
+  const [perfilData, setPerfilData]   = useState<PerfilData | null>(null);
+  const [dbLoading, setDbLoading]     = useState(true);
   const [fechasBloqueadasManual, setFechasBloqueadasManual] = useState<string[]>(
     FECHAS_BLOQUEADAS_INICIALES,
   );
   const [toast, setToast] = useState<{ mensaje: string } | null>(null);
 
-  /* ── Protección de ruta: redirigir si no hay sesión ── */
+  /* ── Protección de ruta ── */
   useEffect(() => {
-    supabase.auth.getSession().then(({ data }) => {
-      if (!data.session) {
-        router.replace("/cuenta");
+    if (!loading && !user) router.replace("/cuenta");
+  }, [user, loading, router]);
+
+  /* ── Carga de datos desde Supabase ── */
+  useEffect(() => {
+    if (loading || !user) return;
+
+    async function fetchData() {
+      setDbLoading(true);
+      try {
+        // 1. Perfil del proveedor
+        const { data: profile } = await supabase
+          .from("Profiles")
+          .select("Nombre, categoria_servicio, precio_servicio, monto_sena, especialidades, descripcion, ubicacion, foto_perfil")
+          .eq("ID", user!.id)
+          .single();
+
+        if (profile) {
+          setPerfilData({
+            nombre:      profile.Nombre        ?? "",
+            descripcion: profile.descripcion   ?? "",
+            categoria:   profile.categoria_servicio ?? "",
+            precioTotal: profile.precio_servicio != null ? String(profile.precio_servicio) : "",
+            precioSena:  profile.monto_sena     != null ? String(profile.monto_sena)       : "",
+            ubicacion:   profile.ubicacion      ?? "",
+            especialidades: Array.isArray(profile.especialidades) ? profile.especialidades : [],
+            fotoPerfil:  profile.foto_perfil    ?? "",
+          });
+        }
+
+        // 2. Reservas donde este usuario es el proveedor
+        const { data: rows } = await supabase
+          .from("reservas")
+          .select("*")
+          .eq("proveedor_id", user!.id)
+          .order("created_at", { ascending: false });
+
+        if (rows && rows.length > 0) {
+          // 3. Resolver nombres de clientes
+          const clienteIds = [...new Set(rows.map((r: any) => r.usuario_id).filter(Boolean))];
+          const { data: clientes } = await supabase
+            .from("Profiles")
+            .select("ID, Nombre")
+            .in("ID", clienteIds);
+
+          const nombreMap: Record<string, string> = {};
+          (clientes ?? []).forEach((c: any) => { nombreMap[c.ID] = c.Nombre ?? "Cliente"; });
+
+          setSolicitudes(rows.map((r: any) => mapSolicitudDB(r, nombreMap[r.usuario_id] ?? "Cliente")));
+        }
+      } finally {
+        setDbLoading(false);
       }
-    });
-  }, [router]);
+    }
+
+    fetchData();
+  }, [user, loading]);
 
   const fechasConfirmadas = solicitudes
     .filter((s) => s.estado === "confirmada")
@@ -1270,23 +1312,36 @@ export default function PanelProveedorPage() {
 
   const pendientesCount = solicitudes.filter((s) => s.estado === "pendiente").length;
 
-  async function handleSignOut() {
-    await supabase.auth.signOut();
-    router.push("/cuenta");
+  async function handleAceptar(id: string) {
+    const { error } = await supabase
+      .from("reservas")
+      .update({ estado: "confirmada" })
+      .eq("id", id);
+
+    if (!error) {
+      setSolicitudes((prev) =>
+        prev.map((s) => (s.id === id ? { ...s, estado: "confirmada" } : s)),
+      );
+      setToast({ mensaje: "Solicitud aceptada — reserva confirmada" });
+    } else {
+      setToast({ mensaje: "Error al aceptar la solicitud" });
+    }
   }
 
-  function handleAceptar(id: string) {
-    setSolicitudes((prev) =>
-      prev.map((s) => (s.id === id ? { ...s, estado: "confirmada" } : s)),
-    );
-    setToast({ mensaje: "Solicitud aceptada — reserva confirmada" });
-  }
+  async function handleRechazar(id: string) {
+    const { error } = await supabase
+      .from("reservas")
+      .update({ estado: "rechazada" })
+      .eq("id", id);
 
-  function handleRechazar(id: string) {
-    setSolicitudes((prev) =>
-      prev.map((s) => (s.id === id ? { ...s, estado: "rechazada" } : s)),
-    );
-    setToast({ mensaje: "Solicitud rechazada" });
+    if (!error) {
+      setSolicitudes((prev) =>
+        prev.map((s) => (s.id === id ? { ...s, estado: "rechazada" } : s)),
+      );
+      setToast({ mensaje: "Solicitud rechazada" });
+    } else {
+      setToast({ mensaje: "Error al rechazar la solicitud" });
+    }
   }
 
   function handleToggleFecha(iso: string) {
@@ -1295,6 +1350,21 @@ export default function PanelProveedorPage() {
       prev.includes(iso) ? prev.filter((f) => f !== iso) : [...prev, iso],
     );
   }
+
+  /* ── Pantalla de carga ── */
+  if (loading || dbLoading) {
+    return (
+      <div className="min-h-screen pt-[50px] flex items-center justify-center" style={{ backgroundColor: "#F3F4F6" }}>
+        <div className="flex flex-col items-center gap-3">
+          <div className="w-10 h-10 border-4 border-orange-200 border-t-orange-500 rounded-full animate-spin" />
+          <p className="text-sm text-gray-500">Cargando tu panel…</p>
+        </div>
+      </div>
+    );
+  }
+
+  const nombreMostrar = perfilData?.nombre ?? user?.email ?? "Proveedor";
+  const inicialMostrar = nombreMostrar[0]?.toUpperCase() ?? "P";
 
   return (
     <div
@@ -1315,10 +1385,10 @@ export default function PanelProveedorPage() {
                   className="w-10 h-10 rounded-full flex items-center justify-center text-sm font-bold flex-shrink-0"
                   style={{ backgroundColor: "#FFF0E6", color: "#E8731A" }}
                 >
-                  M
+                  {inicialMostrar}
                 </div>
                 <div className="min-w-0">
-                  <p className="text-sm font-bold text-gray-800 truncate">DJ Matías López</p>
+                  <p className="text-sm font-bold text-gray-800 truncate">{nombreMostrar}</p>
                   <p className="text-[10px] text-gray-400">Proveedor verificado</p>
                 </div>
               </div>
@@ -1356,7 +1426,7 @@ export default function PanelProveedorPage() {
             {/* Cerrar sesión */}
             <div className="p-3 border-t border-gray-100">
               <button
-                onClick={handleSignOut}
+                onClick={signOut}
                 className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium text-gray-500 hover:bg-gray-50 hover:text-gray-700 transition-colors text-left"
               >
                 <IconLogOut />
@@ -1407,12 +1477,12 @@ export default function PanelProveedorPage() {
           <div className="bg-white border-b border-gray-100 px-6 py-4 flex items-center justify-between gap-4">
             <div>
               <h1 className="text-lg font-bold text-gray-800">
-                Hola, Matías 🎧
+                Hola, {nombreMostrar.split(" ")[0]} 🎧
               </h1>
-              <p className="text-xs text-gray-500 mt-0.5">DJ Matías López · Panel de proveedor</p>
+              <p className="text-xs text-gray-500 mt-0.5">{nombreMostrar} · Panel de proveedor</p>
             </div>
             <button
-              onClick={handleSignOut}
+              onClick={signOut}
               className="flex items-center gap-2 text-xs font-medium text-gray-500 hover:text-gray-700 transition-colors px-3 py-2 rounded-xl hover:bg-gray-100"
             >
               <IconLogOut />
@@ -1440,8 +1510,15 @@ export default function PanelProveedorPage() {
                 onToggle={handleToggleFecha}
               />
             )}
-            {seccion === "perfil" && (
-              <SeccionPerfil onToast={(msg) => setToast({ mensaje: msg })} />
+            {seccion === "perfil" && perfilData && (
+              <SeccionPerfil
+                initialPerfil={perfilData}
+                userId={user!.id}
+                onToast={(msg) => setToast({ mensaje: msg })}
+                onAvatarUploaded={(url) =>
+                  setPerfilData((prev) => prev ? { ...prev, fotoPerfil: url } : prev)
+                }
+              />
             )}
           </main>
         </div>
