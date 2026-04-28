@@ -25,14 +25,15 @@ interface Solicitud {
 }
 
 interface PerfilData {
-  nombre:       string;
-  descripcion?: string;
-  categoria:    string;
-  precioTotal:  string;
-  precioSena:   string;
-  ubicacion?:   string;
-  especialidades: string[];
-  fotoPerfil?:  string;
+  nombre:          string;
+  descripcion?:    string;
+  categoria:       string;
+  precioTotal:     string;
+  precioSena:      string;
+  ubicacion?:      string;
+  especialidades:  string[];
+  fotoPerfil?:     string;
+  mpAlias?:        string;
 }
 
 /* ─────────────────────────────────────────────
@@ -932,11 +933,13 @@ function SeccionPerfil({
   initialPerfil,
   userId,
   onAvatarUploaded,
+  onPerfilGuardado,
 }: {
-  onToast: (msg: string) => void;
+  onToast: (msg: string, tipo?: "exito" | "error") => void;
   initialPerfil: PerfilData;
   userId: string;
   onAvatarUploaded: (url: string) => void;
+  onPerfilGuardado: (p: PerfilData) => void;
 }) {
   const [perfil, setPerfil]     = useState<PerfilData>(initialPerfil);
   const [fotos, setFotos]       = useState<string[]>(FOTOS_INICIALES_PROVEEDOR);
@@ -969,21 +972,52 @@ function SeccionPerfil({
     onToast("Foto agregada correctamente");
   }
 
-  async function handleGuardar(e: React.FormEvent) {
-    e.preventDefault();
+  async function guardarEnDB() {
     setGuardando(true);
+
+    // UPDATE principal: SOLO columnas que SIEMPRE existen en Profiles
     const { error } = await supabase
       .from("Profiles")
       .update({
-        Nombre:            perfil.nombre,
+        Nombre:             perfil.nombre,
         categoria_servicio: perfil.categoria,
-        precio_servicio:   perfil.precioTotal,
-        monto_sena:        perfil.precioSena,
-        especialidades:    perfil.especialidades,
+        precio_servicio:    perfil.precioTotal || null,
+        monto_sena:         perfil.precioSena  || null,
+        especialidades:     perfil.especialidades,
       })
       .eq("ID", userId);
+
+    // Columnas opcionales — cada una en su propio UPDATE para que si falta
+    // alguna, las demás se guarden igual (falla silenciosamente).
+    if (!error) {
+      const opcionales: Array<[string, string | null]> = [
+        ["descripcion", perfil.descripcion?.trim() || null],
+        ["ubicacion",   perfil.ubicacion?.trim()   || null],
+        ["mp_alias",    perfil.mpAlias?.trim()     || null],
+      ];
+      for (const [col, val] of opcionales) {
+        await supabase
+          .from("Profiles")
+          .update({ [col]: val })
+          .eq("ID", userId);
+      }
+    }
+
     setGuardando(false);
-    onToast(error ? "Error al guardar. Intentá de nuevo." : "Perfil actualizado correctamente");
+    if (!error) {
+      // Sincronizar con el padre para que al volver a entrar a "Mi perfil"
+      // se vean los valores recién guardados (no los viejos).
+      onPerfilGuardado(perfil);
+    }
+    onToast(
+      error ? `Error al guardar: ${(error as { message?: string }).message ?? "intentá de nuevo"}` : "Perfil actualizado correctamente",
+      error ? "error" : "exito",
+    );
+  }
+
+  function handleGuardar(e: React.FormEvent) {
+    e.preventDefault();
+    guardarEnDB();
   }
 
   const inputCls =
@@ -1043,7 +1077,7 @@ function SeccionPerfil({
           <textarea
             rows={4}
             className={`${inputCls} resize-none`}
-            value={perfil.descripcion}
+            value={perfil.descripcion ?? ""}
             onChange={(e) => actualizar("descripcion", e.target.value)}
             {...inputFocus}
           />
@@ -1103,7 +1137,7 @@ function SeccionPerfil({
           <input
             type="text"
             className={inputCls}
-            value={perfil.ubicacion}
+            value={perfil.ubicacion ?? ""}
             onChange={(e) => actualizar("ubicacion", e.target.value)}
             placeholder="Ej: CABA y GBA Norte"
             {...inputFocus}
@@ -1156,6 +1190,67 @@ function SeccionPerfil({
           </button>
         </div>
       </form>
+
+      {/* ── Mercado Pago ── */}
+      <div
+        className="bg-white rounded-2xl border border-gray-100 p-6 shadow-sm flex flex-col gap-4"
+        style={{ fontFamily: "var(--font-poppins)" }}
+      >
+        <div className="flex items-center gap-3 pb-4 border-b border-gray-100">
+          <div
+            className="w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0 text-white font-bold text-sm"
+            style={{ backgroundColor: "#009EE3" }}
+          >
+            MP
+          </div>
+          <div>
+            <h3 className="text-base font-bold text-gray-800">Mercado Pago</h3>
+            <p className="text-[11px] text-gray-500 mt-0.5">
+              Tu alias para recibir las transferencias de señas cobradas.
+            </p>
+          </div>
+        </div>
+
+        <div className="flex flex-col gap-1.5">
+          <label className="text-xs font-semibold text-gray-700">Alias de Mercado Pago</label>
+          <input
+            type="text"
+            className={inputCls}
+            value={perfil.mpAlias ?? ""}
+            onChange={(e) => actualizar("mpAlias", e.target.value)}
+            placeholder="ej: juan.perez o 11-2233-4455"
+            {...inputFocus}
+          />
+          <p className="text-[10px] text-gray-400 leading-snug">
+            Solo lo ve el equipo de PLANIT para transferirte el dinero. Los organizadores no pueden verlo.
+          </p>
+        </div>
+
+        <div
+          className="flex items-center gap-2 px-3 py-2.5 rounded-xl text-[11px] font-medium"
+          style={
+            perfil.mpAlias?.trim()
+              ? { backgroundColor: "#DCFCE7", color: "#15803D" }
+              : { backgroundColor: "#FFF7ED", color: "#C25E10" }
+          }
+        >
+          {perfil.mpAlias?.trim()
+            ? `✓ Alias configurado: ${perfil.mpAlias}`
+            : "⚠ Sin alias — completalo para recibir tus cobros"}
+        </div>
+
+        <div className="flex justify-end">
+          <button
+            type="button"
+            disabled={guardando}
+            onClick={() => guardarEnDB()}
+            className="px-8 py-3 rounded-xl text-white font-semibold text-sm disabled:opacity-70 transition-opacity hover:opacity-90"
+            style={{ backgroundColor: "#009EE3" }}
+          >
+            {guardando ? "Guardando..." : "Guardar"}
+          </button>
+        </div>
+      </div>
 
       {/* ── Mis fotos / Portfolio ── */}
       <div
@@ -1241,7 +1336,7 @@ export default function PanelProveedorPage() {
   const [fechasBloqueadasManual, setFechasBloqueadasManual] = useState<string[]>(
     FECHAS_BLOQUEADAS_INICIALES,
   );
-  const [toast, setToast] = useState<{ mensaje: string } | null>(null);
+  const [toast, setToast] = useState<{ mensaje: string; tipo: "exito" | "error" } | null>(null);
 
   /* ── Protección de ruta ── */
   useEffect(() => {
@@ -1255,25 +1350,42 @@ export default function PanelProveedorPage() {
     async function fetchData() {
       setDbLoading(true);
       try {
-        // 1. Perfil del proveedor
+        // 1. Perfil — columnas que SIEMPRE existen
         const { data: profile } = await supabase
           .from("Profiles")
-          .select("Nombre, categoria_servicio, precio_servicio, monto_sena, especialidades, descripcion, ubicacion, foto_perfil")
+          .select("Nombre, categoria_servicio, precio_servicio, monto_sena, especialidades, foto_perfil")
           .eq("ID", user!.id)
           .single();
 
-        if (profile) {
-          setPerfilData({
-            nombre:      profile.Nombre        ?? "",
-            descripcion: profile.descripcion   ?? "",
-            categoria:   profile.categoria_servicio ?? "",
-            precioTotal: profile.precio_servicio != null ? String(profile.precio_servicio) : "",
-            precioSena:  profile.monto_sena     != null ? String(profile.monto_sena)       : "",
-            ubicacion:   profile.ubicacion      ?? "",
-            especialidades: Array.isArray(profile.especialidades) ? profile.especialidades : [],
-            fotoPerfil:  profile.foto_perfil    ?? "",
-          });
+        // 2. Columnas opcionales (descripcion, ubicacion, mp_alias) —
+        //    cada una en su propio SELECT para que si falta alguna,
+        //    las demás se carguen igual.
+        async function fetchOpt(col: string): Promise<string> {
+          const { data, error } = await supabase
+            .from("Profiles")
+            .select(col)
+            .eq("ID", user!.id)
+            .single();
+          if (error || !data) return "";
+          return (data as unknown as Record<string, string | null>)[col] ?? "";
         }
+        const [descripcion, ubicacion, mpAlias] = await Promise.all([
+          fetchOpt("descripcion"),
+          fetchOpt("ubicacion"),
+          fetchOpt("mp_alias"),
+        ]);
+
+        setPerfilData({
+          nombre:        profile?.Nombre              ?? "",
+          descripcion,
+          categoria:     profile?.categoria_servicio  ?? "",
+          precioTotal:   profile?.precio_servicio != null ? String(profile.precio_servicio) : "",
+          precioSena:    profile?.monto_sena      != null ? String(profile.monto_sena)      : "",
+          ubicacion,
+          especialidades: Array.isArray(profile?.especialidades) ? profile.especialidades : [],
+          fotoPerfil:    profile?.foto_perfil         ?? "",
+          mpAlias,
+        });
 
         // 2. Reservas donde este usuario es el proveedor
         const { data: rows } = await supabase
@@ -1322,9 +1434,9 @@ export default function PanelProveedorPage() {
       setSolicitudes((prev) =>
         prev.map((s) => (s.id === id ? { ...s, estado: "confirmada" } : s)),
       );
-      setToast({ mensaje: "Solicitud aceptada — reserva confirmada" });
+      setToast({ mensaje: "Solicitud aceptada — reserva confirmada", tipo: "exito" });
     } else {
-      setToast({ mensaje: "Error al aceptar la solicitud" });
+      setToast({ mensaje: "Error al aceptar la solicitud", tipo: "error" });
     }
   }
 
@@ -1338,9 +1450,9 @@ export default function PanelProveedorPage() {
       setSolicitudes((prev) =>
         prev.map((s) => (s.id === id ? { ...s, estado: "rechazada" } : s)),
       );
-      setToast({ mensaje: "Solicitud rechazada" });
+      setToast({ mensaje: "Solicitud rechazada", tipo: "exito" });
     } else {
-      setToast({ mensaje: "Error al rechazar la solicitud" });
+      setToast({ mensaje: "Error al rechazar la solicitud", tipo: "error" });
     }
   }
 
@@ -1351,7 +1463,7 @@ export default function PanelProveedorPage() {
     );
   }
 
-  /* ── Pantalla de carga ── */
+  /* ── Pantalla de carga / usuario no autenticado ── */
   if (loading || dbLoading) {
     return (
       <div className="min-h-screen pt-[50px] flex items-center justify-center" style={{ backgroundColor: "#F3F4F6" }}>
@@ -1363,7 +1475,11 @@ export default function PanelProveedorPage() {
     );
   }
 
-  const nombreMostrar = perfilData?.nombre ?? user?.email ?? "Proveedor";
+  // user puede volverse null en el frame posterior a signOut — el useEffect
+  // redirige a /cuenta, pero mientras tanto no renderizamos nada para evitar crash.
+  if (!user) return null;
+
+  const nombreMostrar = perfilData?.nombre || user?.email || "Proveedor";
   const inicialMostrar = nombreMostrar[0]?.toUpperCase() ?? "P";
 
   return (
@@ -1514,10 +1630,11 @@ export default function PanelProveedorPage() {
               <SeccionPerfil
                 initialPerfil={perfilData}
                 userId={user!.id}
-                onToast={(msg) => setToast({ mensaje: msg })}
+                onToast={(msg, tipo) => setToast({ mensaje: msg, tipo: tipo ?? "exito" })}
                 onAvatarUploaded={(url) =>
                   setPerfilData((prev) => prev ? { ...prev, fotoPerfil: url } : prev)
                 }
+                onPerfilGuardado={(p) => setPerfilData(p)}
               />
             )}
           </main>
@@ -1528,7 +1645,7 @@ export default function PanelProveedorPage() {
       {toast && (
         <Toast
           mensaje={toast.mensaje}
-          tipo="exito"
+          tipo={toast.tipo}
           onClose={() => setToast(null)}
         />
       )}

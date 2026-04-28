@@ -510,12 +510,13 @@ function FormRegistro({
   const [password, setPassword]   = useState("");
   const [confirm, setConfirm]     = useState("");
   const [categoria, setCategoria] = useState("");
+  const [mpAlias, setMpAlias]     = useState("");
   const [showPass, setShowPass]   = useState(false);
   const [showConf, setShowConf]   = useState(false);
   const [cargando, setCargando]   = useState(false);
   const [errorServer, setErrorServer] = useState<string | null>(null);
 
-  type CampoReg = "nombre" | "email" | "password" | "confirm" | "categoria" | "rol";
+  type CampoReg = "nombre" | "email" | "password" | "confirm" | "categoria" | "rol" | "mpAlias";
   const [errores, setErrores] = useState<Partial<Record<CampoReg, string>>>({});
 
   function limpiarError(campo: CampoReg) {
@@ -577,7 +578,7 @@ function FormRegistro({
         return;
       }
 
-      // 2. Insertar perfil en la tabla Profiles
+      // 2. Insertar perfil en la tabla Profiles — SOLO columnas que siempre existen
       const { error: profileError } = await supabase.from("Profiles").insert({
         ID: userId,
         Nombre: nombre.trim(),
@@ -589,6 +590,15 @@ function FormRegistro({
       if (profileError) {
         console.error("Error al crear perfil:", profileError.message);
         // No bloqueamos el flujo: el usuario fue creado en auth.users
+      }
+
+      // 3. Guardar mp_alias por separado (columna opcional — falla silenciosamente
+      //    si la migración ALTER TABLE no se ejecutó). NUNCA bloquea la creación del perfil.
+      if (!profileError && rol === "proveedor" && mpAlias.trim()) {
+        await supabase
+          .from("Profiles")
+          .update({ mp_alias: mpAlias.trim() })
+          .eq("ID", userId);
       }
 
       onExito();
@@ -731,14 +741,30 @@ function FormRegistro({
           />
 
           {rol === "proveedor" && (
-            <Select
-              label="Categoría de servicio"
-              value={categoria}
-              onChange={(v) => { setCategoria(v); limpiarError("categoria"); }}
-              options={CATEGORIAS}
-              error={errores.categoria}
-              disabled={cargando}
-            />
+            <>
+              <Select
+                label="Categoría de servicio"
+                value={categoria}
+                onChange={(v) => { setCategoria(v); limpiarError("categoria"); }}
+                options={CATEGORIAS}
+                error={errores.categoria}
+                disabled={cargando}
+              />
+              <div className="flex flex-col gap-1.5">
+                <Input
+                  label="Alias de Mercado Pago"
+                  placeholder="ej: juan.perez o 11-2233-4455"
+                  value={mpAlias}
+                  onChange={(v) => { setMpAlias(v); limpiarError("mpAlias"); }}
+                  error={errores.mpAlias}
+                  disabled={cargando}
+                />
+                <p className="text-[10px] text-gray-400 leading-snug" style={{ fontFamily: "var(--font-poppins)" }}>
+                  Lo usamos internamente para transferirte el cobro de las señas.
+                  No es visible para los organizadores.
+                </p>
+              </div>
+            </>
           )}
 
           {/* Error de servidor */}

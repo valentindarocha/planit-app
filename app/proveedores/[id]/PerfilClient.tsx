@@ -2,7 +2,6 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
 import { type Proveedor } from "@/app/data/proveedores";
 import { supabase } from "@/app/lib/supabase";
 
@@ -234,6 +233,21 @@ function pickResenas(id: string, n = 3): Resena[] {
     out.push(RESENAS_POOL[idx]);
   }
   return out;
+}
+
+/* ─────────────────────────────────────────────
+   Helpers de monto
+───────────────────────────────────────────── */
+/** Convierte "$70.000" → 70000 (número entero sin centavos) */
+function parsearMonto(s: string): number {
+  return parseInt(s.replace(/[^0-9]/g, ""), 10) || 0;
+}
+
+/** Devuelve el string solo si tiene formato UUID; si es un slug devuelve null */
+function uuidOrNull(id: string): string | null {
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id)
+    ? id
+    : null;
 }
 
 /* ─────────────────────────────────────────────
@@ -551,10 +565,10 @@ const TIPOS_EVENTO = [
 
 const HORARIOS = ["Mañana", "Tarde", "Noche"];
 
-function Stepper({ paso }: { paso: number }) {
+function Stepper({ paso, total = 4 }: { paso: number; total?: number }) {
   return (
     <div className="flex items-center justify-center gap-0">
-      {[1, 2, 3].map((n, i) => (
+      {Array.from({ length: total }, (_, i) => i + 1).map((n, i) => (
         <div key={n} className="flex items-center">
           <div
             className="w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold transition-all"
@@ -566,9 +580,9 @@ function Stepper({ paso }: { paso: number }) {
           >
             {paso > n ? <IconCheck size={14} /> : n}
           </div>
-          {i < 2 && (
+          {i < total - 1 && (
             <div
-              className="w-10 sm:w-16 h-0.5 transition-colors"
+              className="w-8 sm:w-12 h-0.5 transition-colors"
               style={{ backgroundColor: paso > n ? "#E8731A" : "#E5E7EB" }}
             />
           )}
@@ -589,7 +603,6 @@ function ReservaModal({
   onClose: () => void;
   onConfirmada: (fecha: string) => void;
 }) {
-  const router = useRouter();
   const [paso, setPaso]           = useState(1);
   const [datos, setDatos]         = useState<DatosEvento>({
     tipo: "",
@@ -602,6 +615,11 @@ function ReservaModal({
   const [cargando, setCargando]   = useState(false);
   const [errorEnvio, setErrorEnvio] = useState<string | null>(null);
   const [noSesion, setNoSesion]   = useState(false);
+  /* ID de la reserva creada en DB — necesario para el link de pago */
+  const [reservaId, setReservaId] = useState<string | null>(null);
+  /* Estado del paso 4 (pago) */
+  const [pagando, setPagando]     = useState(false);
+  const [errorPago, setErrorPago] = useState<string | null>(null);
 
   /* Verificar sesión al montar */
   useEffect(() => {
@@ -614,15 +632,13 @@ function ReservaModal({
   useEffect(() => {
     const prev = document.body.style.overflow;
     document.body.style.overflow = "hidden";
-    return () => {
-      document.body.style.overflow = prev;
-    };
+    return () => { document.body.style.overflow = prev; };
   }, []);
 
-  /* Cerrar con Escape (excepto en el paso 3) */
+  /* Cerrar con Escape solo en pasos 1 y 2 */
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
-      if (e.key === "Escape" && paso !== 3) onClose();
+      if (e.key === "Escape" && paso <= 2) onClose();
     }
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
@@ -644,6 +660,7 @@ function ReservaModal({
     return Object.keys(e).length === 0;
   }
 
+  /* Paso 2 → 3: guardar reserva en DB y obtener el ID */
   async function enviar() {
     if (!validarPaso2()) return;
     setErrorEnvio(null);
@@ -651,31 +668,33 @@ function ReservaModal({
 
     try {
       const { data: { user } } = await supabase.auth.getUser();
-      if (!user) {
-        setNoSesion(true);
-        return;
-      }
+      if (!user) { setNoSesion(true); return; }
 
-      const { error } = await supabase.from("reservas").insert({
-        usuario_id:         user.id,
-        proveedor_id:       proveedor.id,
-        fecha_evento:       fecha,
-        tipo_evento:        datos.tipo,
-        cantidad_personas:  parseInt(datos.personas, 10),
-        horario:            datos.horario,
-        ubicacion_evento:   datos.ubicacion.trim(),
-        descripcion_evento: datos.descripcion.trim(),
-        precio_servicio:    proveedor.precioTotal,
-        monto_sena:         proveedor.precioSena,
-        estado:             "pendiente",
-      });
+      const { data: insertData, error } = await supabase
+        .from("reservas")
+        .insert({
+          usuario_id:         user.id,
+          proveedor_id:       uuidOrNull(proveedor.id),
+          fecha_evento:       fecha,
+          tipo_evento:        datos.tipo,
+          cantidad_personas:  parseInt(datos.personas, 10),
+          horario:            datos.horario,
+          ubicacion_evento:   datos.ubicacion.trim(),
+          descripcion_evento: datos.descripcion.trim(),
+          precio_servicio:    parsearMonto(proveedor.precioTotal),
+          monto_sena:         parsearMonto(proveedor.precioSena),
+          estado:             "pendiente",
+        })
+        .select("id")
+        .single();
 
       if (error) {
         console.error("Error al guardar reserva:", error.message);
-        // No bloqueamos el flujo visual ante un error de BD;
-        // la reserva se marca localmente de todas formas.
+        setErrorEnvio("No se pudo guardar la reserva. Por favor intentá de nuevo.");
+        return;
       }
 
+      setReservaId(insertData?.id ?? null);
       onConfirmada(fecha);
       setPaso(3);
     } finally {
@@ -683,15 +702,43 @@ function ReservaModal({
     }
   }
 
-  function irAlInicio() {
-    onClose();
-    router.push("/");
+  /* Paso 4: llamar al endpoint y redirigir a Mercado Pago */
+  async function handlePagar() {
+    if (!reservaId) return;
+    setErrorPago(null);
+    setPagando(true);
+
+    try {
+      const res = await fetch("/api/pagos/crear-preferencia", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          proveedor_nombre: proveedor.nombre,
+          servicio:         datos.tipo || proveedor.categoria,
+          fecha_evento:     fecha,
+          monto_sena:       parsearMonto(proveedor.precioSena),
+          reserva_id:       reservaId,
+        }),
+      });
+
+      const json = await res.json() as { init_point?: string; error?: string };
+
+      if (!res.ok || !json.init_point) {
+        throw new Error(json.error ?? "No se recibió un link de pago");
+      }
+
+      window.location.href = json.init_point;
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : "Error al iniciar el pago";
+      setErrorPago(msg);
+      setPagando(false);
+    }
   }
 
   /* Estilos compartidos para inputs */
   const inputBase =
     "w-full px-4 py-2.5 rounded-xl border text-sm outline-none transition-colors bg-white";
-  const inputOk = { borderColor: "#E5E7EB" };
+  const inputOk  = { borderColor: "#E5E7EB" };
   const inputErr = { borderColor: "#DC2626", backgroundColor: "#FEF2F2" };
 
   return (
@@ -702,7 +749,7 @@ function ReservaModal({
       {/* Overlay */}
       <div
         className="absolute inset-0 bg-black/55 animate-fade-in"
-        onClick={paso !== 3 ? onClose : undefined}
+        onClick={paso <= 2 ? onClose : undefined}
       />
 
       {/* Modal */}
@@ -711,8 +758,8 @@ function ReservaModal({
         role="dialog"
         aria-modal="true"
       >
-        {/* Close */}
-        {paso !== 3 && (
+        {/* Botón cerrar — solo pasos 1 y 2 */}
+        {paso <= 2 && (
           <button
             onClick={onClose}
             aria-label="Cerrar"
@@ -722,7 +769,7 @@ function ReservaModal({
           </button>
         )}
 
-        {/* ── Sin sesión: invitar a iniciar sesión ── */}
+        {/* ── Sin sesión ── */}
         {noSesion && (
           <div className="flex flex-col items-center gap-5 px-8 py-10 text-center animate-step-in">
             <div
@@ -745,7 +792,6 @@ function ReservaModal({
               <Link
                 href="/cuenta"
                 className="cta-button w-full py-3 rounded-xl text-white font-semibold text-sm text-center"
-                style={{ fontFamily: "var(--font-poppins)" }}
               >
                 Iniciar sesión o registrarse
               </Link>
@@ -753,7 +799,6 @@ function ReservaModal({
                 type="button"
                 onClick={onClose}
                 className="w-full py-3 rounded-xl text-sm font-medium text-gray-600 border border-gray-200 hover:bg-gray-50 transition-colors"
-                style={{ fontFamily: "var(--font-poppins)" }}
               >
                 Cancelar
               </button>
@@ -761,275 +806,269 @@ function ReservaModal({
           </div>
         )}
 
-        {/* ── Flujo normal (con sesión) ── */}
+        {/* ── Flujo normal ── */}
         {!noSesion && (
           <>
-        {/* Stepper */}
-        <div className="pt-8 pb-6 px-6">
-          <Stepper paso={paso} />
-          <p className="text-center text-[11px] text-gray-400 mt-3 font-medium">
-            Paso {paso} de 3
-          </p>
-        </div>
-
-        {/* Contenido */}
-        <div className="px-6 pb-8">
-          {/* ═══════════ PASO 1 ═══════════ */}
-          {paso === 1 && (
-            <div className="flex flex-col gap-5 animate-step-in">
-              <div className="text-center">
-                <h2 className="text-xl font-bold text-gray-800">Revisá tu reserva</h2>
-                <p className="text-xs text-gray-500 mt-1">
-                  Confirmá los datos antes de continuar
-                </p>
-              </div>
-
-              <div
-                className="rounded-xl border p-5 flex flex-col gap-3"
-                style={{ borderColor: "#F0E0D0", backgroundColor: "#FFFAF6" }}
-              >
-                <div className="flex items-start justify-between gap-3 pb-3 border-b" style={{ borderColor: "#F0E0D0" }}>
-                  <span className="text-xs text-gray-500">Proveedor</span>
-                  <span className="text-sm font-semibold text-gray-800 text-right">{proveedor.nombre}</span>
-                </div>
-
-                <div className="flex items-start justify-between gap-3 pb-3 border-b" style={{ borderColor: "#F0E0D0" }}>
-                  <span className="text-xs text-gray-500">Fecha</span>
-                  <span className="text-sm font-semibold text-gray-800 text-right">
-                    {formatearFechaLarga(fecha)}
-                  </span>
-                </div>
-
-                <div className="flex items-center justify-between gap-3 pb-3 border-b" style={{ borderColor: "#F0E0D0" }}>
-                  <span className="text-xs text-gray-500">Precio del servicio</span>
-                  <span className="text-sm font-semibold text-gray-700">{proveedor.precioTotal}</span>
-                </div>
-
-                <div className="flex items-center justify-between gap-3">
-                  <span className="text-xs font-semibold uppercase tracking-wider" style={{ color: "#E8731A" }}>
-                    Seña a pagar
-                  </span>
-                  <span className="text-xl font-bold" style={{ color: "#E8731A" }}>
-                    {proveedor.precioSena}
-                  </span>
-                </div>
-              </div>
-
-              <p className="text-[11px] text-gray-400 text-center leading-snug">
-                En el siguiente paso te vamos a pedir algunos detalles del evento para enviar la solicitud al proveedor.
+            {/* Stepper */}
+            <div className="pt-8 pb-5 px-6">
+              <Stepper paso={paso} total={4} />
+              <p className="text-center text-[11px] text-gray-400 mt-3 font-medium">
+                Paso {paso} de 4
               </p>
-
-              <button
-                onClick={() => setPaso(2)}
-                className="cta-button w-full py-3 rounded-xl text-white font-semibold text-sm"
-              >
-                Continuar
-              </button>
             </div>
-          )}
 
-          {/* ═══════════ PASO 2 ═══════════ */}
-          {paso === 2 && (
-            <div className="flex flex-col gap-4 animate-step-in">
-              <div className="text-center">
-                <h2 className="text-xl font-bold text-gray-800">Contanos sobre tu evento</h2>
-                <p className="text-xs text-gray-500 mt-1">
-                  El proveedor necesita estos datos para confirmar la reserva
-                </p>
-              </div>
+            {/* Contenido */}
+            <div className="px-6 pb-8">
 
-              {/* Tipo de evento */}
-              <div className="flex flex-col gap-1.5">
-                <label className="text-xs font-semibold text-gray-700">Tipo de evento</label>
-                <select
-                  value={datos.tipo}
-                  onChange={(e) => actualizar("tipo", e.target.value)}
-                  className={inputBase}
-                  style={errores.tipo ? inputErr : inputOk}
-                >
-                  <option value="">Seleccioná una opción</option>
-                  {TIPOS_EVENTO.map((t) => (
-                    <option key={t} value={t}>{t}</option>
-                  ))}
-                </select>
-              </div>
+              {/* ═══════════ PASO 1: Revisá tu reserva ═══════════ */}
+              {paso === 1 && (
+                <div className="flex flex-col gap-5 animate-step-in">
+                  <div className="text-center">
+                    <h2 className="text-xl font-bold text-gray-800">Revisá tu reserva</h2>
+                    <p className="text-xs text-gray-500 mt-1">Confirmá los datos antes de continuar</p>
+                  </div>
 
-              {/* Cantidad + Horario */}
-              <div className="grid grid-cols-2 gap-3">
-                <div className="flex flex-col gap-1.5">
-                  <label className="text-xs font-semibold text-gray-700">Cant. de personas</label>
-                  <input
-                    type="number"
-                    min={1}
-                    placeholder="Ej: 80"
-                    value={datos.personas}
-                    onChange={(e) => actualizar("personas", e.target.value)}
-                    className={inputBase}
-                    style={errores.personas ? inputErr : inputOk}
-                  />
-                </div>
-                <div className="flex flex-col gap-1.5">
-                  <label className="text-xs font-semibold text-gray-700">Horario</label>
-                  <select
-                    value={datos.horario}
-                    onChange={(e) => actualizar("horario", e.target.value)}
-                    className={inputBase}
-                    style={errores.horario ? inputErr : inputOk}
-                  >
-                    <option value="">Elegí</option>
-                    {HORARIOS.map((h) => (
-                      <option key={h} value={h}>{h}</option>
-                    ))}
-                  </select>
-                </div>
-              </div>
+                  <div className="rounded-xl border p-5 flex flex-col gap-3"
+                    style={{ borderColor: "#F0E0D0", backgroundColor: "#FFFAF6" }}>
+                    <div className="flex items-start justify-between gap-3 pb-3 border-b" style={{ borderColor: "#F0E0D0" }}>
+                      <span className="text-xs text-gray-500">Proveedor</span>
+                      <span className="text-sm font-semibold text-gray-800 text-right">{proveedor.nombre}</span>
+                    </div>
+                    <div className="flex items-start justify-between gap-3 pb-3 border-b" style={{ borderColor: "#F0E0D0" }}>
+                      <span className="text-xs text-gray-500">Fecha</span>
+                      <span className="text-sm font-semibold text-gray-800 text-right">{formatearFechaLarga(fecha)}</span>
+                    </div>
+                    <div className="flex items-center justify-between gap-3 pb-3 border-b" style={{ borderColor: "#F0E0D0" }}>
+                      <span className="text-xs text-gray-500">Precio del servicio</span>
+                      <span className="text-sm font-semibold text-gray-700">{proveedor.precioTotal}</span>
+                    </div>
+                    <div className="flex items-center justify-between gap-3">
+                      <span className="text-xs font-semibold uppercase tracking-wider" style={{ color: "#E8731A" }}>
+                        Seña a pagar
+                      </span>
+                      <span className="text-xl font-bold" style={{ color: "#E8731A" }}>{proveedor.precioSena}</span>
+                    </div>
+                  </div>
 
-              {/* Ubicación */}
-              <div className="flex flex-col gap-1.5">
-                <label className="text-xs font-semibold text-gray-700">Ubicación del evento</label>
-                <input
-                  type="text"
-                  placeholder="Ej: Salón Vía Lacroze, Palermo"
-                  value={datos.ubicacion}
-                  onChange={(e) => actualizar("ubicacion", e.target.value)}
-                  className={inputBase}
-                  style={errores.ubicacion ? inputErr : inputOk}
-                />
-              </div>
-
-              {/* Descripción */}
-              <div className="flex flex-col gap-1.5">
-                <div className="flex items-center justify-between">
-                  <label className="text-xs font-semibold text-gray-700">Descripción del evento</label>
-                  <span
-                    className="text-[10px]"
-                    style={{
-                      color:
-                        datos.descripcion.trim().length >= 20 ? "#15803D" : "#9CA3AF",
-                    }}
-                  >
-                    {datos.descripcion.trim().length}/20 mín.
-                  </span>
-                </div>
-                <textarea
-                  rows={4}
-                  placeholder="Describí brevemente tu evento: qué tipo de celebración es, qué necesitás del proveedor, cualquier detalle relevante..."
-                  value={datos.descripcion}
-                  onChange={(e) => actualizar("descripcion", e.target.value)}
-                  className={`${inputBase} resize-none`}
-                  style={errores.descripcion ? inputErr : inputOk}
-                />
-              </div>
-
-              {/* Aviso si hay errores */}
-              {Object.keys(errores).length > 0 && (
-                <div
-                  className="flex items-center gap-2 px-3 py-2 rounded-lg text-[11px]"
-                  style={{ backgroundColor: "#FEF2F2", color: "#B91C1C" }}
-                >
-                  <IconAlert />
-                  <span>Completá todos los campos para continuar</span>
+                  <p className="text-[11px] text-gray-400 text-center leading-snug">
+                    En el siguiente paso te vamos a pedir algunos detalles del evento.
+                  </p>
+                  <button onClick={() => setPaso(2)} className="cta-button w-full py-3 rounded-xl text-white font-semibold text-sm">
+                    Continuar
+                  </button>
                 </div>
               )}
 
-              {/* Error de envío */}
-              {errorEnvio && (
-                <div
-                  className="px-3 py-2 rounded-lg text-[11px]"
-                  style={{ backgroundColor: "#FEF2F2", color: "#B91C1C" }}
-                >
-                  {errorEnvio}
+              {/* ═══════════ PASO 2: Datos del evento ═══════════ */}
+              {paso === 2 && (
+                <div className="flex flex-col gap-4 animate-step-in">
+                  <div className="text-center">
+                    <h2 className="text-xl font-bold text-gray-800">Contanos sobre tu evento</h2>
+                    <p className="text-xs text-gray-500 mt-1">El proveedor necesita estos datos para confirmar</p>
+                  </div>
+
+                  <div className="flex flex-col gap-1.5">
+                    <label className="text-xs font-semibold text-gray-700">Tipo de evento</label>
+                    <select value={datos.tipo} onChange={(e) => actualizar("tipo", e.target.value)}
+                      className={inputBase} style={errores.tipo ? inputErr : inputOk}>
+                      <option value="">Seleccioná una opción</option>
+                      {TIPOS_EVENTO.map((t) => <option key={t} value={t}>{t}</option>)}
+                    </select>
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-3">
+                    <div className="flex flex-col gap-1.5">
+                      <label className="text-xs font-semibold text-gray-700">Cant. de personas</label>
+                      <input type="number" min={1} placeholder="Ej: 80" value={datos.personas}
+                        onChange={(e) => actualizar("personas", e.target.value)}
+                        className={inputBase} style={errores.personas ? inputErr : inputOk} />
+                    </div>
+                    <div className="flex flex-col gap-1.5">
+                      <label className="text-xs font-semibold text-gray-700">Horario</label>
+                      <select value={datos.horario} onChange={(e) => actualizar("horario", e.target.value)}
+                        className={inputBase} style={errores.horario ? inputErr : inputOk}>
+                        <option value="">Elegí</option>
+                        {HORARIOS.map((h) => <option key={h} value={h}>{h}</option>)}
+                      </select>
+                    </div>
+                  </div>
+
+                  <div className="flex flex-col gap-1.5">
+                    <label className="text-xs font-semibold text-gray-700">Ubicación del evento</label>
+                    <input type="text" placeholder="Ej: Salón Vía Lacroze, Palermo" value={datos.ubicacion}
+                      onChange={(e) => actualizar("ubicacion", e.target.value)}
+                      className={inputBase} style={errores.ubicacion ? inputErr : inputOk} />
+                  </div>
+
+                  <div className="flex flex-col gap-1.5">
+                    <div className="flex items-center justify-between">
+                      <label className="text-xs font-semibold text-gray-700">Descripción del evento</label>
+                      <span className="text-[10px]" style={{ color: datos.descripcion.trim().length >= 20 ? "#15803D" : "#9CA3AF" }}>
+                        {datos.descripcion.trim().length}/20 mín.
+                      </span>
+                    </div>
+                    <textarea rows={4}
+                      placeholder="Describí brevemente tu evento: qué tipo de celebración es, qué necesitás del proveedor..."
+                      value={datos.descripcion} onChange={(e) => actualizar("descripcion", e.target.value)}
+                      className={`${inputBase} resize-none`} style={errores.descripcion ? inputErr : inputOk} />
+                  </div>
+
+                  {Object.keys(errores).length > 0 && (
+                    <div className="flex items-center gap-2 px-3 py-2 rounded-lg text-[11px]"
+                      style={{ backgroundColor: "#FEF2F2", color: "#B91C1C" }}>
+                      <IconAlert />
+                      <span>Completá todos los campos para continuar</span>
+                    </div>
+                  )}
+                  {errorEnvio && (
+                    <div className="px-3 py-2 rounded-lg text-[11px]"
+                      style={{ backgroundColor: "#FEF2F2", color: "#B91C1C" }}>
+                      {errorEnvio}
+                    </div>
+                  )}
+
+                  <div className="flex gap-3 pt-2">
+                    <button onClick={() => setPaso(1)} disabled={cargando}
+                      className="flex-1 py-3 rounded-xl text-sm font-semibold border transition-colors hover:bg-gray-50 disabled:opacity-50"
+                      style={{ borderColor: "#E5E7EB", color: "#4B5563" }}>
+                      Volver
+                    </button>
+                    <button onClick={enviar} disabled={cargando}
+                      className="cta-button flex-[2] py-3 rounded-xl text-white font-semibold text-sm flex items-center justify-center gap-2 disabled:opacity-70">
+                      {cargando ? (
+                        <>
+                          <svg className="animate-spin" xmlns="http://www.w3.org/2000/svg" width="16" height="16"
+                            viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round">
+                            <path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83" />
+                          </svg>
+                          Guardando…
+                        </>
+                      ) : "Confirmar datos"}
+                    </button>
+                  </div>
                 </div>
               )}
 
-              {/* Botones */}
-              <div className="flex gap-3 pt-2">
-                <button
-                  onClick={() => setPaso(1)}
-                  disabled={cargando}
-                  className="flex-1 py-3 rounded-xl text-sm font-semibold border transition-colors hover:bg-gray-50 disabled:opacity-50"
-                  style={{ borderColor: "#E5E7EB", color: "#4B5563" }}
-                >
-                  Volver
-                </button>
-                <button
-                  onClick={enviar}
-                  disabled={cargando}
-                  className="cta-button flex-[2] py-3 rounded-xl text-white font-semibold text-sm flex items-center justify-center gap-2 disabled:opacity-70"
-                >
-                  {cargando ? (
-                    <>
-                      <svg className="animate-spin" xmlns="http://www.w3.org/2000/svg" width="16" height="16"
-                        viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round">
-                        <path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83" />
-                      </svg>
-                      Enviando...
-                    </>
-                  ) : "Enviar solicitud"}
-                </button>
-              </div>
+              {/* ═══════════ PASO 3: Solicitud enviada ═══════════ */}
+              {paso === 3 && (
+                <div className="flex flex-col items-center gap-5 animate-step-in">
+                  <div className="w-20 h-20 rounded-full flex items-center justify-center animate-pop"
+                    style={{ backgroundColor: "#DCFCE7", color: "#15803D" }}>
+                    <IconCheckCircle size={44} />
+                  </div>
+
+                  <div className="text-center">
+                    <h2 className="text-2xl font-bold text-gray-800">¡Solicitud enviada!</h2>
+                    <p className="text-sm text-gray-500 mt-2 leading-relaxed max-w-sm mx-auto">
+                      Tus datos fueron registrados. Ahora pagá la seña para que el proveedor reciba y confirme tu reserva.
+                    </p>
+                  </div>
+
+                  <div className="w-full rounded-xl border p-4 flex flex-col gap-2.5"
+                    style={{ borderColor: "#F0E0D0", backgroundColor: "#FFFAF6" }}>
+                    <div className="flex items-start justify-between gap-3">
+                      <span className="text-xs text-gray-500">Proveedor</span>
+                      <span className="text-xs font-semibold text-gray-800 text-right">{proveedor.nombre}</span>
+                    </div>
+                    <div className="flex items-start justify-between gap-3">
+                      <span className="text-xs text-gray-500">Fecha</span>
+                      <span className="text-xs font-semibold text-gray-800 text-right">{formatearFechaLarga(fecha)}</span>
+                    </div>
+                    <div className="flex items-start justify-between gap-3">
+                      <span className="text-xs text-gray-500">Tipo de evento</span>
+                      <span className="text-xs font-semibold text-gray-800 text-right">{datos.tipo}</span>
+                    </div>
+                  </div>
+
+                  <button
+                    onClick={() => setPaso(4)}
+                    className="cta-button w-full py-3.5 rounded-xl text-white font-semibold text-sm mt-1"
+                  >
+                    Continuar al pago →
+                  </button>
+                </div>
+              )}
+
+              {/* ═══════════ PASO 4: Pagar seña ═══════════ */}
+              {paso === 4 && (
+                <div className="flex flex-col items-center gap-6 animate-step-in">
+                  {/* Ícono MP */}
+                  <div className="w-16 h-16 rounded-2xl flex items-center justify-center shadow-sm"
+                    style={{ backgroundColor: "#009EE3" }}>
+                    <svg width="32" height="32" viewBox="0 0 48 48" fill="none">
+                      <circle cx="24" cy="24" r="24" fill="#009EE3"/>
+                      <path d="M12 26.5c0-4.14 3.36-7.5 7.5-7.5h9c4.14 0 7.5 3.36 7.5 7.5s-3.36 7.5-7.5 7.5h-9C15.36 34 12 30.64 12 26.5z" fill="white"/>
+                      <circle cx="19.5" cy="20" r="4.5" fill="white"/>
+                      <circle cx="28.5" cy="20" r="4.5" fill="white"/>
+                    </svg>
+                  </div>
+
+                  <div className="text-center">
+                    <h2 className="text-xl font-bold text-gray-800">Pagá la seña con Mercado Pago</h2>
+                    <p className="text-sm text-gray-500 mt-1.5 leading-relaxed max-w-xs mx-auto">
+                      Vas a ser redirigido a Mercado Pago para completar el pago de forma segura.
+                    </p>
+                  </div>
+
+                  {/* Monto destacado */}
+                  <div className="w-full rounded-2xl border-2 p-5 text-center"
+                    style={{ borderColor: "#E8731A", backgroundColor: "#FFFAF6" }}>
+                    <p className="text-xs font-semibold uppercase tracking-wider mb-1" style={{ color: "#E8731A" }}>
+                      Monto a pagar
+                    </p>
+                    <p className="text-4xl font-bold" style={{ color: "#E8731A" }}>{proveedor.precioSena}</p>
+                    <p className="text-xs text-gray-400 mt-1">Seña para asegurar tu fecha</p>
+                  </div>
+
+                  {/* Trust signals */}
+                  <div className="w-full flex flex-col gap-2 text-xs text-gray-500">
+                    <div className="flex items-center gap-2" style={{ color: "#15803D" }}>
+                      <IconShield />
+                      <span>Pago 100% seguro con Mercado Pago</span>
+                    </div>
+                    <div className="flex items-center gap-2" style={{ color: "#15803D" }}>
+                      <IconRefresh />
+                      <span>Devolución garantizada si no hay confirmación</span>
+                    </div>
+                  </div>
+
+                  {errorPago && (
+                    <div className="w-full flex items-center gap-2 px-3 py-2.5 rounded-xl text-[11px]"
+                      style={{ backgroundColor: "#FEF2F2", color: "#B91C1C" }}>
+                      <IconAlert />
+                      <span>{errorPago}</span>
+                    </div>
+                  )}
+
+                  <button
+                    onClick={handlePagar}
+                    disabled={pagando}
+                    className="cta-button w-full py-4 rounded-xl text-white font-bold text-base flex items-center justify-center gap-3 disabled:opacity-70"
+                  >
+                    {pagando ? (
+                      <>
+                        <svg className="animate-spin" xmlns="http://www.w3.org/2000/svg" width="18" height="18"
+                          viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round">
+                          <path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83" />
+                        </svg>
+                        Redirigiendo…
+                      </>
+                    ) : (
+                      <>Pagar seña · {proveedor.precioSena}</>
+                    )}
+                  </button>
+
+                  <button
+                    onClick={() => setPaso(3)}
+                    disabled={pagando}
+                    className="text-xs text-gray-400 hover:text-gray-600 transition-colors disabled:opacity-40"
+                  >
+                    ← Volver
+                  </button>
+                </div>
+              )}
+
             </div>
-          )}
-
-          {/* ═══════════ PASO 3 ═══════════ */}
-          {paso === 3 && (
-            <div className="flex flex-col items-center gap-5 animate-step-in">
-              {/* Check verde */}
-              <div
-                className="w-20 h-20 rounded-full flex items-center justify-center animate-pop"
-                style={{ backgroundColor: "#DCFCE7", color: "#15803D" }}
-              >
-                <IconCheckCircle size={44} />
-              </div>
-
-              <div className="text-center">
-                <h2 className="text-2xl font-bold text-gray-800">¡Solicitud enviada!</h2>
-                <p className="text-sm text-gray-500 mt-2 leading-relaxed max-w-sm mx-auto">
-                  Tu solicitud fue enviada al proveedor. Recibirás una respuesta en las próximas 24 horas. Si el proveedor acepta, se habilitará el pago de la seña.
-                </p>
-              </div>
-
-              {/* Resumen */}
-              <div
-                className="w-full rounded-xl border p-4 flex flex-col gap-2.5"
-                style={{ borderColor: "#F0E0D0", backgroundColor: "#FFFAF6" }}
-              >
-                <div className="flex items-start justify-between gap-3">
-                  <span className="text-xs text-gray-500">Proveedor</span>
-                  <span className="text-xs font-semibold text-gray-800 text-right">{proveedor.nombre}</span>
-                </div>
-                <div className="flex items-start justify-between gap-3">
-                  <span className="text-xs text-gray-500">Fecha</span>
-                  <span className="text-xs font-semibold text-gray-800 text-right">
-                    {formatearFechaLarga(fecha)}
-                  </span>
-                </div>
-                <div className="flex items-start justify-between gap-3">
-                  <span className="text-xs text-gray-500">Tipo de evento</span>
-                  <span className="text-xs font-semibold text-gray-800 text-right">{datos.tipo}</span>
-                </div>
-              </div>
-
-              {/* Estado */}
-              <div className="flex items-center gap-2">
-                <span className="text-xs text-gray-500">Estado:</span>
-                <span
-                  className="px-3 py-1 rounded-full text-[11px] font-semibold"
-                  style={{ backgroundColor: "#FFF0E6", color: "#C25E10" }}
-                >
-                  Solicitud enviada
-                </span>
-              </div>
-
-              <button
-                onClick={irAlInicio}
-                className="cta-button w-full py-3 rounded-xl text-white font-semibold text-sm mt-2"
-              >
-                Volver al inicio
-              </button>
-            </div>
-          )}
-        </div>
           </>
         )}
       </div>

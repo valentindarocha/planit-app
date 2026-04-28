@@ -438,13 +438,27 @@ function FotoPerfilEditable({
 }) {
   return (
     <div className="relative flex-shrink-0 group" style={{ width: size, height: size }}>
-      {/* eslint-disable-next-line @next/next/no-img-element */}
-      <img
-        src={foto}
-        alt={nombre}
-        className="rounded-full object-cover w-full h-full border-2"
-        style={{ borderColor: "#FFF0E6" }}
-      />
+      {foto ? (
+        // eslint-disable-next-line @next/next/no-img-element
+        <img
+          src={foto}
+          alt={nombre}
+          className="rounded-full object-cover w-full h-full border-2"
+          style={{ borderColor: "#FFF0E6" }}
+        />
+      ) : (
+        <div
+          className="rounded-full w-full h-full border-2 flex items-center justify-center font-bold"
+          style={{
+            borderColor: "#FFF0E6",
+            backgroundColor: "#FFF0E6",
+            color: "#E8731A",
+            fontSize: size * 0.4,
+          }}
+        >
+          {(nombre?.[0] ?? "?").toUpperCase()}
+        </div>
+      )}
       {/* Overlay editar */}
       <button
         type="button"
@@ -785,11 +799,13 @@ function SeccionPerfil({
   initialData,
   userId,
   onAvatarUploaded,
+  onDatosGuardados,
 }: {
   onToast: (msg: string) => void;
   initialData: UserData;
   userId: string;
   onAvatarUploaded: (url: string) => void;
+  onDatosGuardados: (d: UserData) => void;
 }) {
   const [datos, setDatos]     = useState<UserData>(initialData);
   const [guardando, setGuardando] = useState(false);
@@ -801,12 +817,35 @@ function SeccionPerfil({
   async function handleGuardar(e: React.FormEvent) {
     e.preventDefault();
     setGuardando(true);
+
+    // UPDATE principal — SOLO columnas que SIEMPRE existen
     const { error } = await supabase
       .from("Profiles")
       .update({ Nombre: datos.nombre })
       .eq("ID", userId);
+
+    // Columnas opcionales — cada una en su propio UPDATE para que si falta
+    // alguna, las demás se guarden igual.
+    if (!error) {
+      const opcionales: Array<[string, string | null]> = [
+        ["telefono",  datos.telefono?.trim()  || null],
+        ["ubicacion", datos.ubicacion?.trim() || null],
+      ];
+      for (const [col, val] of opcionales) {
+        await supabase
+          .from("Profiles")
+          .update({ [col]: val })
+          .eq("ID", userId);
+      }
+    }
+
     setGuardando(false);
-    onToast(error ? "Error al guardar. Intentá de nuevo." : "Perfil actualizado correctamente");
+    if (!error) onDatosGuardados(datos);
+    onToast(
+      error
+        ? `Error al guardar: ${(error as { message?: string }).message ?? "intentá de nuevo"}`
+        : "Perfil actualizado correctamente",
+    );
   }
 
   const inputCls =
@@ -880,7 +919,7 @@ function SeccionPerfil({
           <input
             type="text"
             className={inputCls}
-            value={datos.telefono}
+            value={datos.telefono ?? ""}
             onChange={(e) => actualizar("telefono", e.target.value)}
             placeholder="+54 9 11 0000-0000"
             {...inputFocus}
@@ -893,7 +932,7 @@ function SeccionPerfil({
           <input
             type="text"
             className={inputCls}
-            value={datos.ubicacion}
+            value={datos.ubicacion ?? ""}
             onChange={(e) => actualizar("ubicacion", e.target.value)}
             placeholder="Ej: Palermo, CABA"
             {...inputFocus}
@@ -1207,16 +1246,32 @@ export default function PanelOrganizadorPage() {
       setDbLoading(true);
       try {
         // 1. Perfil del usuario
+        // SELECT base con columnas seguras
         const { data: profile } = await supabase
           .from("Profiles")
           .select("Nombre, Email, foto_perfil")
           .eq("ID", user!.id)
           .single();
 
+        // SELECT opcional para columnas que pueden no existir aún
+        let telefono = "";
+        let ubicacion = "";
+        const { data: opt } = await supabase
+          .from("Profiles")
+          .select("telefono, ubicacion")
+          .eq("ID", user!.id)
+          .single();
+        if (opt) {
+          telefono  = (opt as { telefono?: string }).telefono   ?? "";
+          ubicacion = (opt as { ubicacion?: string }).ubicacion ?? "";
+        }
+
         const ud: UserData = {
           nombre:     profile?.Nombre     ?? user!.email ?? "",
           email:      profile?.Email      ?? user!.email ?? "",
           fotoPerfil: profile?.foto_perfil ?? "",
+          telefono,
+          ubicacion,
         };
         setProfileData(ud);
         setFotoPerfil(ud.fotoPerfil);
@@ -1430,6 +1485,7 @@ export default function PanelOrganizadorPage() {
                 initialData={profileData}
                 userId={user.id}
                 onAvatarUploaded={(url) => setFotoPerfil(url)}
+                onDatosGuardados={(d) => setProfileData(d)}
               />
             )}
           </main>
