@@ -15,6 +15,30 @@ export interface Proveedor {
   fechasOcupadas: string[];
 }
 
+/* Tipo unificado para mostrar en el catálogo: cubre tanto mocks como proveedores
+   reales de Supabase. Los campos opcionales son los que Supabase puede no tener aún. */
+export interface ProveedorUnificado {
+  id: string;
+  nombre: string;
+  categoria: string;
+  imagen: string | null;       // null → mostrar inicial como placeholder
+  ubicacion: string;
+  precioBase: string;
+  precioTotal: string;
+  precioSena: string;
+  rating: number | null;       // null → mostrar badge "Nuevo"
+  especialidades: string[];
+  eventosRealizados: number;
+  descripcion: string;
+  galeria: string[];
+  fechasOcupadas: string[];
+  isMock: boolean;
+}
+
+export function mockToUnificado(p: Proveedor): ProveedorUnificado {
+  return { ...p, isMock: true };
+}
+
 export const proveedores: Proveedor[] = [
 
   /* ── DJs ── */

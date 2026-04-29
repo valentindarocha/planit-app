@@ -569,16 +569,7 @@ function FormRegistro({
         return;
       }
 
-      // Si no hay sesión activa es porque Supabase requiere confirmación de email
-      if (!data.session) {
-        onExito();
-        setErrorServer(
-          "Te enviamos un email de confirmación. Confirmá tu cuenta y luego iniciá sesión."
-        );
-        return;
-      }
-
-      // 2. Insertar perfil en la tabla Profiles — SOLO columnas que siempre existen
+      // 2. Insertar perfil en la tabla Profiles — SIEMPRE, haya sesión o no
       const { error: profileError } = await supabase.from("Profiles").insert({
         ID: userId,
         Nombre: nombre.trim(),
@@ -592,8 +583,7 @@ function FormRegistro({
         // No bloqueamos el flujo: el usuario fue creado en auth.users
       }
 
-      // 3. Guardar mp_alias por separado (columna opcional — falla silenciosamente
-      //    si la migración ALTER TABLE no se ejecutó). NUNCA bloquea la creación del perfil.
+      // 3. Guardar mp_alias por separado (columna opcional — falla silenciosamente)
       if (!profileError && rol === "proveedor" && mpAlias.trim()) {
         await supabase
           .from("Profiles")
@@ -601,9 +591,18 @@ function FormRegistro({
           .eq("ID", userId);
       }
 
+      // 4. Si no hay sesión activa es porque Supabase requiere confirmación de email
+      if (!data.session) {
+        onExito();
+        setErrorServer(
+          "Te enviamos un email de confirmación. Confirmá tu cuenta y luego iniciá sesión."
+        );
+        return;
+      }
+
       onExito();
 
-      // 3. Redirigir según tipo de cuenta
+      // 5. Redirigir según tipo de cuenta
       if (rol === "proveedor") {
         router.push("/panel-proveedor");
       } else {

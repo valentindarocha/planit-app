@@ -2,7 +2,7 @@
 
 import { useState, useMemo, useRef, useEffect } from "react";
 import Link from "next/link";
-import { type Proveedor } from "@/app/data/proveedores";
+import { type ProveedorUnificado } from "@/app/data/proveedores";
 
 /* ─────────────────────────────────────────────
    Helpers
@@ -86,19 +86,33 @@ function StarRating({ rating }: { rating: number }) {
 /* ─────────────────────────────────────────────
    Tarjeta de proveedor
 ───────────────────────────────────────────── */
-function ProveedorCard({ proveedor }: { proveedor: Proveedor }) {
+function ProveedorCard({ proveedor }: { proveedor: ProveedorUnificado }) {
+  const inicial = proveedor.nombre.charAt(0).toUpperCase();
+
   return (
     <Link
       href={`/proveedores/${proveedor.id}`}
       className="proveedor-card group flex flex-col bg-white rounded-2xl overflow-hidden shadow-sm border border-gray-100"
     >
+      {/* Imagen o placeholder con inicial */}
       <div className="relative h-40 overflow-hidden">
-        {/* eslint-disable-next-line @next/next/no-img-element */}
-        <img
-          src={proveedor.imagen}
-          alt={proveedor.nombre}
-          className="w-full h-full object-cover object-center transition-transform duration-500 group-hover:scale-105"
-        />
+        {proveedor.imagen ? (
+          // eslint-disable-next-line @next/next/no-img-element
+          <img
+            src={proveedor.imagen}
+            alt={proveedor.nombre}
+            className="w-full h-full object-cover object-center transition-transform duration-500 group-hover:scale-105"
+          />
+        ) : (
+          <div
+            className="w-full h-full flex items-center justify-center"
+            style={{ backgroundColor: "#FFF0E6" }}
+          >
+            <span className="text-5xl font-bold" style={{ color: "#E8731A", fontFamily: "var(--font-poppins)" }}>
+              {inicial}
+            </span>
+          </div>
+        )}
       </div>
 
       <div className="flex flex-col flex-1 p-4 gap-2">
@@ -120,12 +134,24 @@ function ProveedorCard({ proveedor }: { proveedor: Proveedor }) {
           ))}
         </div>
 
-        <StarRating rating={proveedor.rating} />
+        {/* Rating o badge "Nuevo" */}
+        {proveedor.rating !== null ? (
+          <StarRating rating={proveedor.rating} />
+        ) : (
+          <span
+            className="self-start px-2.5 py-0.5 rounded-full text-[10px] font-semibold"
+            style={{ backgroundColor: "#FFF3E0", color: "#E8731A", fontFamily: "var(--font-poppins)" }}
+          >
+            Nuevo
+          </span>
+        )}
 
-        <div className="flex items-center gap-1 text-gray-400 text-xs" style={{ fontFamily: "var(--font-poppins)" }}>
-          <IconCheck />
-          <span>{proveedor.eventosRealizados} eventos realizados</span>
-        </div>
+        {proveedor.eventosRealizados > 0 && (
+          <div className="flex items-center gap-1 text-gray-400 text-xs" style={{ fontFamily: "var(--font-poppins)" }}>
+            <IconCheck />
+            <span>{proveedor.eventosRealizados} eventos realizados</span>
+          </div>
+        )}
 
         <div className="flex flex-col gap-0.5 mt-auto pt-1" style={{ fontFamily: "var(--font-poppins)" }}>
           <div className="flex items-baseline justify-between gap-2">
@@ -250,7 +276,7 @@ export default function ProveedoresClient({
   lista,
   nombreCategoria,
 }: {
-  lista: Proveedor[];
+  lista: ProveedorUnificado[];
   nombreCategoria: string;
 }) {
   const [zonas,          setZonas]          = useState<string[]>([]);
@@ -285,7 +311,7 @@ export default function ProveedoresClient({
 
     if (ratings.length > 0)
       f = f.filter((p) =>
-        ratings.some((r) => p.rating >= parseFloat(r))
+        p.rating !== null && ratings.some((r) => p.rating! >= parseFloat(r))
       );
 
     if (especialidades.length > 0)
@@ -294,7 +320,11 @@ export default function ProveedoresClient({
       );
 
     f.sort((a, b) => {
-      if (ordenar === "rating")      return b.rating - a.rating;
+      if (ordenar === "rating") {
+        const ra = a.rating ?? -1;
+        const rb = b.rating ?? -1;
+        return rb - ra;
+      }
       if (ordenar === "precio-asc")  return parsePrice(a.precioBase) - parsePrice(b.precioBase);
       if (ordenar === "precio-desc") return parsePrice(b.precioBase) - parsePrice(a.precioBase);
       return 0;
