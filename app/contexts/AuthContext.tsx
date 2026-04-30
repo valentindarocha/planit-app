@@ -63,22 +63,25 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   useEffect(() => {
-    /* 1. Recuperar sesión existente al montar */
-    supabase.auth.getSession().then(({ data: { session } }) => {
+    /* 1. Recuperar sesión existente al montar.
+          Se aguarda fetchProfile para que loading=false solo ocurra
+          cuando tipoCuenta ya tenga un valor definitivo. */
+    supabase.auth.getSession().then(async ({ data: { session } }) => {
       setSession(session);
       setUser(session?.user ?? null);
-      if (session?.user) fetchProfile(session.user.id);
+      if (session?.user) await fetchProfile(session.user.id);
       setLoading(false);
     });
 
-    /* 2. Escuchar cambios de estado de auth */
+    /* 2. Escuchar cambios de estado de auth.
+          Igual: no bajar loading hasta tener el perfil. */
     const {
       data: { subscription },
-    } = supabase.auth.onAuthStateChange((_event, session) => {
+    } = supabase.auth.onAuthStateChange(async (_event, session) => {
       setSession(session);
       setUser(session?.user ?? null);
       if (session?.user) {
-        fetchProfile(session.user.id);
+        await fetchProfile(session.user.id);
       } else {
         setTipoCuenta(null);
         setAvatarUrl(null);

@@ -56,8 +56,12 @@ export default function Navbar() {
   const { user, tipoCuenta, loading, avatarUrl, signOut } = useAuth();
 
   const nombreDisplay = user?.email ?? "";
-  /* Ruta del panel según tipo de cuenta */
-  const panelHref = tipoCuenta === "proveedor" ? "/panel-proveedor" : "/panel-organizador";
+
+  /* tipoCuenta puede llegar null un instante después de que loading=false
+     si el query a Profiles aún no resolvió (race condition). En ese caso
+     bloqueamos la navegación al panel hasta tener el valor definitivo. */
+  const panelListo = tipoCuenta !== null;
+  const panelHref  = tipoCuenta === "proveedor" ? "/panel-proveedor" : "/panel-organizador";
 
   return (
     <header
@@ -97,13 +101,26 @@ export default function Navbar() {
             /* Usuario logueado: avatar + Mi Panel + Cerrar sesión */
             <>
               <li>
-                <Link
-                  href={panelHref}
-                  className="flex items-center gap-2 text-white font-semibold text-sm tracking-wide hover:text-orange-100 transition-colors duration-200"
-                >
-                  <NavAvatar url={avatarUrl} nombre={nombreDisplay} />
-                  Mi Panel
-                </Link>
+                {panelListo ? (
+                  <Link
+                    href={panelHref}
+                    className="flex items-center gap-2 text-white font-semibold text-sm tracking-wide hover:text-orange-100 transition-colors duration-200"
+                  >
+                    <NavAvatar url={avatarUrl} nombre={nombreDisplay} />
+                    Mi Panel
+                  </Link>
+                ) : (
+                  /* tipoCuenta aún no llegó: botón deshabilitado con spinner */
+                  <span className="flex items-center gap-2 text-white/50 font-semibold text-sm tracking-wide cursor-not-allowed select-none">
+                    <NavAvatar url={avatarUrl} nombre={nombreDisplay} />
+                    <span className="flex items-center gap-1.5">
+                      <svg className="animate-spin" xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round">
+                        <path d="M21 12a9 9 0 1 1-6.219-8.56" />
+                      </svg>
+                      Mi Panel
+                    </span>
+                  </span>
+                )}
               </li>
               <li>
                 <button
@@ -165,14 +182,27 @@ export default function Navbar() {
             user ? (
               <>
                 <li>
-                  <Link
-                    href={panelHref}
-                    onClick={() => setMenuOpen(false)}
-                    className="flex items-center gap-2 text-white font-semibold text-sm py-3 border-b border-orange-400/40 hover:text-orange-100 transition-colors duration-200"
-                  >
-                    <NavAvatar url={avatarUrl} nombre={nombreDisplay} />
-                    Mi Panel
-                  </Link>
+                  {panelListo ? (
+                    <Link
+                      href={panelHref}
+                      onClick={() => setMenuOpen(false)}
+                      className="flex items-center gap-2 text-white font-semibold text-sm py-3 border-b border-orange-400/40 hover:text-orange-100 transition-colors duration-200"
+                    >
+                      <NavAvatar url={avatarUrl} nombre={nombreDisplay} />
+                      Mi Panel
+                    </Link>
+                  ) : (
+                    /* tipoCuenta aún no llegó: ítem deshabilitado con spinner */
+                    <span className="flex items-center gap-2 text-white/50 font-semibold text-sm py-3 border-b border-orange-400/40 cursor-not-allowed select-none">
+                      <NavAvatar url={avatarUrl} nombre={nombreDisplay} />
+                      <span className="flex items-center gap-1.5">
+                        <svg className="animate-spin" xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round">
+                          <path d="M21 12a9 9 0 1 1-6.219-8.56" />
+                        </svg>
+                        Mi Panel
+                      </span>
+                    </span>
+                  )}
                 </li>
                 <li>
                   <button

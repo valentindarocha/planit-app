@@ -6,6 +6,14 @@ import Link from "next/link";
 import { useAuth } from "../contexts/AuthContext";
 import { supabase } from "../lib/supabase";
 import AvatarUpload from "../components/AvatarUpload";
+import { proveedores as proveedoresMock } from "../data/proveedores";
+
+/* Devuelve el string si es UUID válido, null si es un slug de mock */
+function uuidOrNull(id: string): string | null {
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id)
+    ? id
+    : null;
+}
 
 /* ─────────────────────────────────────────────
    Tipos
@@ -1284,17 +1292,31 @@ export default function PanelOrganizadorPage() {
           .order("fecha_evento", { ascending: true });
 
         if (reservasDB && reservasDB.length > 0) {
-          // Nombres de proveedores (lookup por IDs únicos)
-          const provIds = [...new Set(reservasDB.map((r) => r.proveedor_id).filter(Boolean))];
+          // Separar IDs en UUIDs reales y slugs de proveedores mock
+          const todosIds   = [...new Set(reservasDB.map((r: { proveedor_id: string }) => r.proveedor_id).filter(Boolean))];
+          const uuids      = todosIds.filter((id) => uuidOrNull(id) !== null);
+          const slugsMock  = todosIds.filter((id) => uuidOrNull(id) === null);
+
           const provMap = new Map<string, string>();
-          if (provIds.length > 0) {
+
+          // UUIDs reales → buscar en Supabase Profiles
+          if (uuids.length > 0) {
             const { data: provs } = await supabase
               .from("Profiles")
               .select("ID, Nombre")
-              .in("ID", provIds);
-            provs?.forEach((p) => provMap.set(p.ID, p.Nombre ?? "Proveedor"));
+              .in("ID", uuids);
+            provs?.forEach((p: { ID: string; Nombre: string | null }) =>
+              provMap.set(p.ID, p.Nombre ?? "Proveedor"),
+            );
           }
-          setReservas(reservasDB.map((r) => mapReservaDB(r, provMap.get(r.proveedor_id) ?? "Proveedor")));
+
+          // Slugs mock → buscar en el array local de proveedores
+          slugsMock.forEach((slug) => {
+            const mock = proveedoresMock.find((p) => p.id === slug);
+            provMap.set(slug, mock?.nombre ?? slug);
+          });
+
+          setReservas(reservasDB.map((r: { proveedor_id: string }) => mapReservaDB(r, provMap.get(r.proveedor_id) ?? "Proveedor")));
         } else {
           setReservas([]);
         }
