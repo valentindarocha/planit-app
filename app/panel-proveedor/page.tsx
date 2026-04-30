@@ -22,6 +22,7 @@ interface Solicitud {
   precio: string;
   mensaje: string;
   estado: EstadoSolicitud;
+  montoSena: number; // monto_sena de la reserva (lo que se cobró como seña)
 }
 
 interface PerfilData {
@@ -50,6 +51,7 @@ function mapSolicitudDB(row: any, clienteNombre: string): Solicitud {
     precio:     row.precio_servicio     ? `$${row.precio_servicio}` : "–",
     mensaje:    row.descripcion_evento  ?? "–",
     estado:     (row.estado ?? "pendiente") as EstadoSolicitud,
+    montoSena:  Number(row.monto_sena)  || 0,
   };
 }
 
@@ -431,6 +433,21 @@ function SeccionResumen({
     .filter((s) => s.estado === "confirmada" && new Date(s.fecha + "T00:00:00") >= hoy)
     .sort((a, b) => a.fecha.localeCompare(b.fecha))[0];
 
+  // Ingresos del mes: suma de monto_sena de reservas confirmadas cuyo evento
+  // cae en el mes y año actuales.
+  const mesActual = hoy.getMonth();
+  const anioActual = hoy.getFullYear();
+  const ingresosMes = solicitudes
+    .filter((s) => {
+      if (s.estado !== "confirmada" || !s.fecha) return false;
+      const d = new Date(s.fecha + "T00:00:00");
+      return d.getMonth() === mesActual && d.getFullYear() === anioActual;
+    })
+    .reduce((acc, s) => acc + s.montoSena, 0);
+  const ingresosMesStr = ingresosMes > 0
+    ? `$${ingresosMes.toLocaleString("es-AR")}`
+    : "$0";
+
   const metricas = [
     {
       label: "Solicitudes pendientes",
@@ -458,7 +475,7 @@ function SeccionResumen({
     },
     {
       label: "Ingresos del mes",
-      valor: "$420.000",
+      valor: ingresosMesStr,
       icono: <IconTrendingUp />,
       color: "#0EA5E9",
       bg: "#E0F2FE",

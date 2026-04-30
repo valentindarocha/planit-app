@@ -15,9 +15,8 @@ type PerfilSupabase = {
   categoria_servicio: string;
   foto_perfil: string | null;
   ubicacion: string | null;
-  precio_base: number | null;
-  precio_total: number | null;
-  precio_sena: number | null;
+  precio_servicio: number | null;  // precio total del servicio
+  monto_sena: number | null;        // seña a pagar para reservar
   rating: number | null;
   especialidades: string[] | null;
   descripcion: string | null;
@@ -36,9 +35,9 @@ function perfilToUnificado(p: PerfilSupabase): ProveedorUnificado {
     categoria:          p.categoria_servicio,
     imagen:             p.foto_perfil ?? null,
     ubicacion:          p.ubicacion ?? "Argentina",
-    precioBase:         formatarPrecio(p.precio_base),
-    precioTotal:        formatarPrecio(p.precio_total, "$"),
-    precioSena:         formatarPrecio(p.precio_sena, "$"),
+    precioBase:         formatarPrecio(p.precio_servicio),           // para el filtro de precio
+    precioTotal:        formatarPrecio(p.precio_servicio, "$"),      // precio del servicio
+    precioSena:         formatarPrecio(p.monto_sena, "$"),           // seña a pagar
     rating:             p.rating ?? null,
     especialidades:     p.especialidades ?? [],
     eventosRealizados:  p.eventos_realizados ?? 0,
