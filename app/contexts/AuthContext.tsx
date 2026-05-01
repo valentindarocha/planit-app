@@ -64,29 +64,50 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   useEffect(() => {
     /* 1. Recuperar sesión existente al montar.
-          Se aguarda fetchProfile para que loading=false solo ocurra
-          cuando tipoCuenta ya tenga un valor definitivo. */
-    supabase.auth.getSession().then(async ({ data: { session } }) => {
-      setSession(session);
-      setUser(session?.user ?? null);
-      if (session?.user) await fetchProfile(session.user.id);
-      setLoading(false);
-    });
+          try/finally GARANTIZA que setLoading(false) corra incluso si
+          getSession o fetchProfile rechazan la promesa. Sin esto, un
+          fallo en producción (RLS, red, columna inexistente) deja la
+          Navbar trabada en el skeleton para siempre. */
+    (async () => {
+      try {
+        const { data: { session } } = await supabase.auth.getSession();
+        setSession(session);
+        setUser(session?.user ?? null);
+        if (session?.user) {
+          try {
+            await fetchProfile(session.user.id);
+          } catch (e) {
+            console.error("[AuthContext] fetchProfile inicial falló:", e);
+          }
+        }
+      } catch (e) {
+        console.error("[AuthContext] getSession falló:", e);
+      } finally {
+        setLoading(false);
+      }
+    })();
 
     /* 2. Escuchar cambios de estado de auth.
-          Igual: no bajar loading hasta tener el perfil. */
+          Igual: try/finally garantiza loading=false aunque algo explote. */
     const {
       data: { subscription },
     } = supabase.auth.onAuthStateChange(async (_event, session) => {
-      setSession(session);
-      setUser(session?.user ?? null);
-      if (session?.user) {
-        await fetchProfile(session.user.id);
-      } else {
-        setTipoCuenta(null);
-        setAvatarUrl(null);
+      try {
+        setSession(session);
+        setUser(session?.user ?? null);
+        if (session?.user) {
+          try {
+            await fetchProfile(session.user.id);
+          } catch (e) {
+            console.error("[AuthContext] fetchProfile en onAuthStateChange falló:", e);
+          }
+        } else {
+          setTipoCuenta(null);
+          setAvatarUrl(null);
+        }
+      } finally {
+        setLoading(false);
       }
-      setLoading(false);
     });
 
     return () => subscription.unsubscribe();
