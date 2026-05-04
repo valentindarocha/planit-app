@@ -69,28 +69,60 @@ export async function POST(request: NextRequest) {
     const preference = new Preference(client);
     const BASE_URL   = getBaseUrl();
 
-    const result = await preference.create({
-      body: {
-        items: [
-          {
-            id:          reserva_id,
-            title:       `Seña - ${proveedor_nombre} - ${servicio || "Evento"}`,
-            quantity:    1,
-            unit_price:  Number(monto_sena),
-            currency_id: "ARS",
+    /* Log de diagnóstico ANTES de llamar a MP */
+    console.log("=== [MP] Creando preferencia ===");
+    console.log("[MP] BASE_URL:", BASE_URL);
+    console.log("[MP] reserva_id:", reserva_id);
+    console.log("[MP] monto_sena:", monto_sena, "(tipo:", typeof monto_sena, ")");
+    console.log("[MP] accessToken prefix:", accessToken.slice(0, 15), "... length:", accessToken.length);
+    console.log("[MP] back_urls.success:", `${BASE_URL}/reserva/exito?reserva_id=${reserva_id}`);
+
+    let result;
+    try {
+      result = await preference.create({
+        body: {
+          items: [
+            {
+              id:          reserva_id,
+              title:       `Seña - ${proveedor_nombre} - ${servicio || "Evento"}`,
+              quantity:    1,
+              unit_price:  Number(monto_sena),
+              currency_id: "ARS",
+            },
+          ],
+          back_urls: {
+            success: `${BASE_URL}/reserva/exito?reserva_id=${reserva_id}`,
+            failure: `${BASE_URL}/reserva/error?reserva_id=${reserva_id}`,
+            pending: `${BASE_URL}/reserva/pendiente?reserva_id=${reserva_id}`,
           },
-        ],
-        back_urls: {
-          success: `${BASE_URL}/reserva/exito?reserva_id=${reserva_id}`,
-          failure: `${BASE_URL}/reserva/error?reserva_id=${reserva_id}`,
-          pending: `${BASE_URL}/reserva/pendiente?reserva_id=${reserva_id}`,
+          auto_return:          "approved",
+          external_reference:   String(reserva_id),
+          statement_descriptor: "PLANIT",
+          metadata: { reserva_id, proveedor_nombre, fecha_evento },
         },
-        auto_return:          "approved",
-        external_reference:   String(reserva_id),
-        statement_descriptor: "PLANIT",
-        metadata: { reserva_id, proveedor_nombre, fecha_evento },
-      },
-    });
+      });
+      console.log("[MP] Preferencia creada OK. init_point:", result.init_point);
+    } catch (mpErr: unknown) {
+      /* Capturar específicamente el error que devuelve la API de MP.
+         El SDK de mercadopago suele incluir { status, cause, message } */
+      console.error("=== [MP] ERROR al crear preferencia ===");
+      console.error("[MP] tipo:", typeof mpErr);
+      console.error("[MP] err completo:", mpErr);
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const e = mpErr as any;
+      if (e?.message)  console.error("[MP] message:",  e.message);
+      if (e?.status)   console.error("[MP] status:",   e.status);
+      if (e?.cause)    console.error("[MP] cause:",    JSON.stringify(e.cause, null, 2));
+      if (e?.response) console.error("[MP] response:", JSON.stringify(e.response, null, 2));
+
+      const detalle = e?.cause
+        ? JSON.stringify(e.cause)
+        : (e?.message ?? "Error desconocido al llamar a Mercado Pago");
+      return Response.json(
+        { error: `Mercado Pago: ${detalle}` },
+        { status: 502 },
+      );
+    }
 
     if (!result.init_point) {
       return Response.json(
@@ -102,7 +134,8 @@ export async function POST(request: NextRequest) {
     return Response.json({ init_point: result.init_point });
 
   } catch (err: unknown) {
-    console.error("Error al crear preferencia MP:", err);
+    console.error("=== [MP] ERROR fuera del bloque MP ===");
+    console.error(err);
     const message = err instanceof Error ? err.message : "Error desconocido";
     return Response.json({ error: message }, { status: 500 });
   }

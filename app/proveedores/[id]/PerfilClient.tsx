@@ -1121,6 +1121,56 @@ export default function PerfilClient({
   /* Fechas bloqueadas por reservas hechas en esta sesión */
   const [fechasReservadas, setFechasReservadas]   = useState<string[]>([]);
 
+  /* Datos de contacto del proveedor — visibles SOLO si el organizador
+     logueado tiene al menos una reserva confirmada con este proveedor */
+  const [contacto, setContacto] = useState<{ email: string; telefono: string } | null>(null);
+
+  useEffect(() => {
+    /* Solo aplica para proveedores reales (UUID). Los mocks no tienen
+       reservas asociadas en la DB. */
+    const provUuid = uuidOrNull(proveedor.id);
+    if (!provUuid) return;
+
+    let cancelado = false;
+    (async () => {
+      try {
+        const { data: { user } } = await supabase.auth.getUser();
+        if (!user || cancelado) return;
+
+        // ¿Hay al menos una reserva confirmada de este organizador con este proveedor?
+        const { data: reservasConf } = await supabase
+          .from("reservas")
+          .select("id")
+          .eq("usuario_id", user.id)
+          .eq("proveedor_id", provUuid)
+          .eq("estado", "confirmada")
+          .limit(1);
+
+        if (cancelado || !reservasConf || reservasConf.length === 0) return;
+
+        // Sí hay → traer email y teléfono del proveedor
+        const { data: prof } = await supabase
+          .from("Profiles")
+          .select("Email, Telefono, telefono")
+          .eq("ID", provUuid)
+          .single();
+
+        if (cancelado || !prof) return;
+
+        setContacto({
+          email:    (prof as { Email?: string }).Email ?? "",
+          telefono: (prof as { Telefono?: string; telefono?: string }).Telefono
+                  || (prof as { telefono?: string }).telefono
+                  || "",
+        });
+      } catch (e) {
+        console.error("[PerfilClient] No se pudo cargar contacto:", e);
+      }
+    })();
+
+    return () => { cancelado = true; };
+  }, [proveedor.id]);
+
   /* Lista combinada: ocupadas de origen + reservadas en esta sesión */
   const fechasBloqueadas = [...proveedor.fechasOcupadas, ...fechasReservadas];
 
@@ -1231,6 +1281,75 @@ export default function PerfilClient({
                 error={errorReserva}
               />
             </div>
+
+            {/* ── Datos de contacto (solo si hay reserva confirmada) ── */}
+            {contacto && (
+              <section className="py-8 border-b border-gray-100">
+                <div
+                  className="rounded-2xl border p-5 flex flex-col gap-3"
+                  style={{ borderColor: "#BBF7D0", backgroundColor: "#F0FDF4", fontFamily: "var(--font-poppins)" }}
+                >
+                  <div className="flex items-center gap-2">
+                    <span
+                      className="text-[10px] px-2 py-1 rounded-full font-semibold flex items-center gap-1"
+                      style={{ backgroundColor: "#DCFCE7", color: "#15803D" }}
+                    >
+                      <IconCheck size={10} />
+                      Reserva confirmada
+                    </span>
+                    <h2 className="text-base font-bold text-gray-800">Datos de contacto del proveedor</h2>
+                  </div>
+                  <p className="text-xs text-gray-500 leading-relaxed">
+                    Tenés una reserva confirmada con {proveedor.nombre}. Estos datos están disponibles
+                    para que coordinen los detalles del evento.
+                  </p>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mt-1">
+                    {contacto.email && (
+                      <a
+                        href={`mailto:${contacto.email}`}
+                        className="flex items-center gap-2 px-3 py-2.5 rounded-xl bg-white border hover:border-orange-400 transition-colors"
+                        style={{ borderColor: "#E5E7EB" }}
+                      >
+                        <span
+                          className="w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0"
+                          style={{ backgroundColor: "#FFF0E6", color: "#E8731A" }}
+                        >
+                          ✉
+                        </span>
+                        <div className="flex flex-col min-w-0">
+                          <span className="text-[10px] font-semibold text-gray-400 uppercase tracking-wide">Email</span>
+                          <span className="text-xs font-semibold text-gray-700 truncate">{contacto.email}</span>
+                        </div>
+                      </a>
+                    )}
+                    {contacto.telefono && (
+                      <a
+                        href={`tel:${contacto.telefono}`}
+                        className="flex items-center gap-2 px-3 py-2.5 rounded-xl bg-white border hover:border-orange-400 transition-colors"
+                        style={{ borderColor: "#E5E7EB" }}
+                      >
+                        <span
+                          className="w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0"
+                          style={{ backgroundColor: "#FFF0E6", color: "#E8731A" }}
+                        >
+                          ☏
+                        </span>
+                        <div className="flex flex-col min-w-0">
+                          <span className="text-[10px] font-semibold text-gray-400 uppercase tracking-wide">Teléfono</span>
+                          <span className="text-xs font-semibold text-gray-700 truncate">{contacto.telefono}</span>
+                        </div>
+                      </a>
+                    )}
+                    {!contacto.email && !contacto.telefono && (
+                      <p className="text-xs text-gray-500 italic col-span-2">
+                        El proveedor todavía no completó sus datos de contacto. Te recomendamos
+                        avisarle por la plataforma.
+                      </p>
+                    )}
+                  </div>
+                </div>
+              </section>
+            )}
 
             {/* ── Sección 2: Galería ── */}
             <section className="py-10 border-b border-gray-100">

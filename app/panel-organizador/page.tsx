@@ -32,6 +32,9 @@ interface Reserva {
   senaPagada: boolean;
   estado: EstadoReserva;
   mensajeProveedor: string;
+  /* Datos de contacto del proveedor — solo poblados cuando estado === "confirmada" */
+  proveedorEmail?: string;
+  proveedorTelefono?: string;
 }
 
 interface UserData {
@@ -46,7 +49,8 @@ interface UserData {
    Helpers de mapeo DB → UI
 ───────────────────────────────────────────── */
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-function mapReservaDB(row: any, provNombre: string): Reserva {
+function mapReservaDB(row: any, provNombre: string, provContacto?: { email: string; telefono: string }): Reserva {
+  const estado = (row.estado ?? "pendiente") as EstadoReserva;
   return {
     id:              row.id,
     proveedor:       provNombre,
@@ -55,9 +59,12 @@ function mapReservaDB(row: any, provNombre: string): Reserva {
     fecha:           row.fecha_evento ?? "",
     precio:          row.precio_servicio ? `$${row.precio_servicio}` : "–",
     sena:            row.monto_sena    ? `$${row.monto_sena}`    : "–",
-    senaPagada:      false,
-    estado:          (row.estado ?? "pendiente") as EstadoReserva,
+    senaPagada:      estado === "confirmada",
+    estado,
     mensajeProveedor: row.descripcion_evento ?? "",
+    /* Solo exponer contacto cuando la reserva está confirmada */
+    proveedorEmail:    estado === "confirmada" ? provContacto?.email    : undefined,
+    proveedorTelefono: estado === "confirmada" ? provContacto?.telefono : undefined,
   };
 }
 
@@ -396,6 +403,33 @@ function DetalleReservaModal({
                 &ldquo;{reserva.mensajeProveedor}&rdquo;
               </p>
             </div>
+
+            {/* Datos de contacto — solo si la reserva está confirmada */}
+            {reserva.estado === "confirmada" && (reserva.proveedorEmail || reserva.proveedorTelefono) && (
+              <div
+                className="col-span-2 p-3 rounded-xl border flex flex-col gap-2"
+                style={{ borderColor: "#BBF7D0", backgroundColor: "#F0FDF4" }}
+              >
+                <span className="text-[10px] font-semibold uppercase tracking-wide flex items-center gap-1" style={{ color: "#15803D" }}>
+                  <IconCheck size={10} />
+                  Datos de contacto del proveedor
+                </span>
+                <div className="flex flex-col gap-1.5">
+                  {reserva.proveedorEmail && (
+                    <a href={`mailto:${reserva.proveedorEmail}`} className="text-sm text-gray-700 hover:text-orange-600 transition-colors flex items-center gap-2">
+                      <span className="text-gray-400">✉</span>
+                      <span className="font-semibold truncate">{reserva.proveedorEmail}</span>
+                    </a>
+                  )}
+                  {reserva.proveedorTelefono && (
+                    <a href={`tel:${reserva.proveedorTelefono}`} className="text-sm text-gray-700 hover:text-orange-600 transition-colors flex items-center gap-2">
+                      <span className="text-gray-400">☏</span>
+                      <span className="font-semibold">{reserva.proveedorTelefono}</span>
+                    </a>
+                  )}
+                </div>
+              </div>
+            )}
           </div>
 
           {/* Acción cancelar */}
@@ -1297,26 +1331,37 @@ export default function PanelOrganizadorPage() {
           const uuids      = todosIds.filter((id) => uuidOrNull(id) !== null);
           const slugsMock  = todosIds.filter((id) => uuidOrNull(id) === null);
 
-          const provMap = new Map<string, string>();
+          const provMap         = new Map<string, string>();
+          const contactoMap     = new Map<string, { email: string; telefono: string }>();
 
-          // UUIDs reales → buscar en Supabase Profiles
+          // UUIDs reales → buscar nombre + contacto en Supabase Profiles
           if (uuids.length > 0) {
             const { data: provs } = await supabase
               .from("Profiles")
-              .select("ID, Nombre")
+              .select("ID, Nombre, Email, Telefono, telefono")
               .in("ID", uuids);
-            provs?.forEach((p: { ID: string; Nombre: string | null }) =>
-              provMap.set(p.ID, p.Nombre ?? "Proveedor"),
-            );
+            provs?.forEach((p: { ID: string; Nombre: string | null; Email?: string; Telefono?: string; telefono?: string }) => {
+              provMap.set(p.ID, p.Nombre ?? "Proveedor");
+              contactoMap.set(p.ID, {
+                email:    p.Email ?? "",
+                telefono: p.Telefono || p.telefono || "",
+              });
+            });
           }
 
-          // Slugs mock → buscar en el array local de proveedores
+          // Slugs mock → buscar en el array local de proveedores (no tienen contacto real)
           slugsMock.forEach((slug) => {
             const mock = proveedoresMock.find((p) => p.id === slug);
             provMap.set(slug, mock?.nombre ?? slug);
           });
 
-          setReservas(reservasDB.map((r: { proveedor_id: string }) => mapReservaDB(r, provMap.get(r.proveedor_id) ?? "Proveedor")));
+          setReservas(reservasDB.map((r: { proveedor_id: string }) =>
+            mapReservaDB(
+              r,
+              provMap.get(r.proveedor_id) ?? "Proveedor",
+              contactoMap.get(r.proveedor_id),
+            ),
+          ));
         } else {
           setReservas([]);
         }
