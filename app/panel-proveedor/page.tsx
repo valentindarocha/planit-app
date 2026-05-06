@@ -296,14 +296,31 @@ function Toast({
 
 /* ─────────────────────────────────────────────
    Badge de estado
+   Tolera cualquier variante de mayúsculas/minúsculas y nunca rompe:
+   si llega un valor desconocido o null, muestra un badge gris genérico
+   con el texto tal cual llegó.
 ───────────────────────────────────────────── */
-function BadgeEstado({ estado }: { estado: EstadoSolicitud }) {
-  const map: Record<EstadoSolicitud, { bg: string; text: string; label: string; dot: string }> = {
+function BadgeEstado({ estado }: { estado: EstadoSolicitud | string | null | undefined }) {
+  const map: Record<string, { bg: string; text: string; label: string; dot: string }> = {
     pendiente:  { bg: "#FEF9C3", text: "#854D0E", label: "Pendiente",  dot: "#CA8A04" },
     confirmada: { bg: "#DCFCE7", text: "#15803D", label: "Confirmada", dot: "#16A34A" },
     rechazada:  { bg: "#FEE2E2", text: "#B91C1C", label: "Rechazada",  dot: "#DC2626" },
+    cancelada:  { bg: "#F3F4F6", text: "#4B5563", label: "Cancelada",  dot: "#9CA3AF" },
   };
-  const s = map[estado];
+
+  // Normalizar: trim + lowercase para tolerar "Confirmada", " confirmada ", etc.
+  const key = String(estado ?? "").trim().toLowerCase();
+
+  // Default seguro si el estado no está mapeado (incluye null/undefined/"")
+  const fallback = {
+    bg: "#F3F4F6",
+    text: "#4B5563",
+    label: estado ? String(estado) : "Sin estado",
+    dot: "#9CA3AF",
+  };
+
+  const s = map[key] ?? fallback;
+
   return (
     <span
       className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-semibold"
