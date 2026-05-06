@@ -37,31 +37,45 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    /* 2. Buscar el proveedor_id en la reserva y luego su access_token en Profiles */
+    /* 2. Buscar el proveedor_id en la reserva y su access_token en Profiles.
+          El admin client es OPCIONAL: si no está disponible (env vars faltantes
+          o key inválido), nos degradamos al MP_ACCESS_TOKEN de PLANIT.
+          Esto evita que el flujo de pago se rompa por configuración incompleta. */
     let accessToken = process.env.MP_ACCESS_TOKEN ?? "";   // fallback: cuenta de PLANIT
 
     const admin = getSupabaseAdmin();
+    if (admin) {
+      try {
+        const { data: reservaData } = await admin
+          .from("reservas")
+          .select("proveedor_id")
+          .eq("id", reserva_id)
+          .single();
 
-    const { data: reservaData } = await admin
-      .from("reservas")
-      .select("proveedor_id")
-      .eq("id", reserva_id)
-      .single();
+        if (reservaData?.proveedor_id) {
+          const { data: profileData } = await admin
+            .from("Profiles")
+            .select("mp_access_token")
+            .eq("ID", reservaData.proveedor_id)
+            .single();
 
-    if (reservaData?.proveedor_id) {
-      const { data: profileData } = await admin
-        .from("Profiles")
-        .select("mp_access_token")
-        .eq("ID", reservaData.proveedor_id)
-        .single();
-
-      if (profileData?.mp_access_token) {
-        accessToken = profileData.mp_access_token;   // ✅ pago va al proveedor
+          if (profileData?.mp_access_token) {
+            accessToken = profileData.mp_access_token;   // pago va al proveedor
+          }
+        }
+      } catch (lookupErr) {
+        console.warn("[MP] Lookup admin falló, usando token de PLANIT:", lookupErr);
+        // No abortamos: el accessToken ya tiene el fallback de PLANIT
       }
+    } else {
+      console.warn("[MP] Admin client no disponible. Usando MP_ACCESS_TOKEN de PLANIT.");
     }
 
     if (!accessToken) {
-      return Response.json({ error: "Configuración de pago no disponible" }, { status: 500 });
+      return Response.json(
+        { error: "MP_ACCESS_TOKEN no configurado en el servidor. Contactá al administrador." },
+        { status: 500 },
+      );
     }
 
     /* 3. Crear preferencia con el token correspondiente */
