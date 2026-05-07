@@ -83,38 +83,52 @@ export async function POST(request: NextRequest) {
     const preference = new Preference(client);
     const BASE_URL   = getBaseUrl();
 
+    /* Validación explícita: unit_price DEBE ser number > 0
+       MP rechaza strings y valores ≤ 0 con error confuso */
+    const unitPrice = Number(monto_sena);
+    if (!Number.isFinite(unitPrice) || unitPrice <= 0) {
+      console.error("[MP] unit_price inválido:", monto_sena, "→", unitPrice);
+      return Response.json(
+        { error: `unit_price inválido: ${monto_sena}` },
+        { status: 400 },
+      );
+    }
+
+    /* Construir el body como objeto separado para poder loguearlo entero */
+    const preferenceBody = {
+      items: [
+        {
+          id:          reserva_id,
+          title:       `Seña - ${proveedor_nombre} - ${servicio || "Evento"}`,
+          quantity:    1,
+          unit_price:  unitPrice,            // ← number garantizado
+          currency_id: "ARS",
+        },
+      ],
+      back_urls: {
+        success: `${BASE_URL}/reserva/exito?reserva_id=${reserva_id}`,
+        failure: `${BASE_URL}/reserva/error?reserva_id=${reserva_id}`,
+        pending: `${BASE_URL}/reserva/pendiente?reserva_id=${reserva_id}`,
+      },
+      auto_return:          "approved" as const,
+      external_reference:   String(reserva_id),
+      statement_descriptor: "PLANIT",
+      metadata: { reserva_id, proveedor_nombre, fecha_evento },
+    };
+
     /* Log de diagnóstico ANTES de llamar a MP */
     console.log("=== [MP] Creando preferencia ===");
     console.log("[MP] BASE_URL:", BASE_URL);
     console.log("[MP] reserva_id:", reserva_id);
-    console.log("[MP] monto_sena:", monto_sena, "(tipo:", typeof monto_sena, ")");
+    console.log("[MP] monto_sena (input):", monto_sena, "(tipo:", typeof monto_sena, ")");
+    console.log("[MP] unit_price (final):", unitPrice, "(tipo:", typeof unitPrice, ")");
     console.log("[MP] accessToken prefix:", accessToken.slice(0, 15), "... length:", accessToken.length);
-    console.log("[MP] back_urls.success:", `${BASE_URL}/reserva/exito?reserva_id=${reserva_id}`);
+    console.log("[MP] BODY COMPLETO →");
+    console.log(JSON.stringify(preferenceBody, null, 2));
 
     let result;
     try {
-      result = await preference.create({
-        body: {
-          items: [
-            {
-              id:          reserva_id,
-              title:       `Seña - ${proveedor_nombre} - ${servicio || "Evento"}`,
-              quantity:    1,
-              unit_price:  Number(monto_sena),
-              currency_id: "ARS",
-            },
-          ],
-          back_urls: {
-            success: `${BASE_URL}/reserva/exito?reserva_id=${reserva_id}`,
-            failure: `${BASE_URL}/reserva/error?reserva_id=${reserva_id}`,
-            pending: `${BASE_URL}/reserva/pendiente?reserva_id=${reserva_id}`,
-          },
-          auto_return:          "approved",
-          external_reference:   String(reserva_id),
-          statement_descriptor: "PLANIT",
-          metadata: { reserva_id, proveedor_nombre, fecha_evento },
-        },
-      });
+      result = await preference.create({ body: preferenceBody });
       console.log("[MP] Preferencia creada OK. init_point:", result.init_point);
     } catch (mpErr: unknown) {
       /* Capturar específicamente el error que devuelve la API de MP.
