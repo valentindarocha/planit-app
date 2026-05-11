@@ -277,13 +277,27 @@ function Toast({
 /* ─────────────────────────────────────────────
    Badge de estado de reserva
 ───────────────────────────────────────────── */
-function BadgeEstadoReserva({ estado }: { estado: EstadoReserva }) {
-  const map: Record<EstadoReserva, { bg: string; text: string; label: string; dot: string }> = {
+function BadgeEstadoReserva({ estado }: { estado: EstadoReserva | string | null | undefined }) {
+  const map: Record<string, { bg: string; text: string; label: string; dot: string }> = {
     pendiente:  { bg: "#FEF9C3", text: "#854D0E", label: "Pendiente",  dot: "#CA8A04" },
     confirmada: { bg: "#DCFCE7", text: "#15803D", label: "Confirmada", dot: "#16A34A" },
     cancelada:  { bg: "#FEE2E2", text: "#B91C1C", label: "Cancelada",  dot: "#DC2626" },
+    rechazada:  { bg: "#FEE2E2", text: "#B91C1C", label: "Rechazada",  dot: "#DC2626" },
   };
-  const s = map[estado];
+
+  // Normalizar para tolerar mayúsculas, espacios, null
+  const key = String(estado ?? "").trim().toLowerCase();
+
+  // Fallback genérico para cualquier valor inesperado — evita que la app rompa
+  const fallback = {
+    bg: "#F3F4F6",
+    text: "#4B5563",
+    label: estado ? String(estado) : "Sin estado",
+    dot: "#9CA3AF",
+  };
+
+  const s = map[key] ?? fallback;
+
   return (
     <span
       className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-semibold"
