@@ -272,12 +272,19 @@ function ReservaPanel({
   fechaSeleccionada,
   onReservar,
   error,
+  requiereFecha = false,
 }: {
   proveedor: Proveedor;
   fechaSeleccionada: string | null;
   onReservar: () => void;
   error: string | null;
+  /* Si true, el botón "Reservar" queda deshabilitado hasta que haya fecha
+     seleccionada. Pensado para mobile, donde el panel está debajo del
+     calendario y el usuario primero elige y después confirma. */
+  requiereFecha?: boolean;
 }) {
+  const botonDeshabilitado = requiereFecha && !fechaSeleccionada;
+
   return (
     <div
       className="rounded-2xl border p-5 flex flex-col"
@@ -307,14 +314,33 @@ function ReservaPanel({
           style={{ backgroundColor: "#FFF0E6", color: "#C25E10" }}
         >
           <IconCheck size={12} />
-          <span className="font-medium">{formatearFechaLarga(fechaSeleccionada)}</span>
+          <span className="font-medium">
+            {requiereFecha && <span className="font-semibold">Fecha seleccionada: </span>}
+            {formatearFechaLarga(fechaSeleccionada)}
+          </span>
         </div>
       )}
 
-      {/* Botón */}
+      {/* Mensaje guía cuando no hay fecha y se requiere */}
+      {requiereFecha && !fechaSeleccionada && (
+        <div
+          className="mb-3 px-3 py-2 rounded-lg flex items-center gap-2 text-xs"
+          style={{ backgroundColor: "#F3F4F6", color: "#6B7280" }}
+        >
+          <IconAlert />
+          <span className="font-medium">Elegí una fecha en el calendario para reservar</span>
+        </div>
+      )}
+
+      {/* Botón — deshabilitado/gris si requiereFecha y no hay fecha */}
       <button
         onClick={onReservar}
-        className="cta-button w-full py-3 rounded-xl text-white font-semibold text-sm"
+        disabled={botonDeshabilitado}
+        className={
+          botonDeshabilitado
+            ? "w-full py-3 rounded-xl font-semibold text-sm bg-gray-200 text-gray-400 cursor-not-allowed"
+            : "cta-button w-full py-3 rounded-xl text-white font-semibold text-sm"
+        }
       >
         Reservar fecha
       </button>
@@ -1272,16 +1298,6 @@ export default function PerfilClient({
               </div>
             </section>
 
-            {/* ── Panel de reserva INLINE para mobile ── */}
-            <div className="lg:hidden py-6 border-b border-gray-100">
-              <ReservaPanel
-                proveedor={proveedor}
-                fechaSeleccionada={fechaSeleccionada}
-                onReservar={handleReservar}
-                error={errorReserva}
-              />
-            </div>
-
             {/* ── Datos de contacto (solo si hay reserva confirmada) ── */}
             {contacto && (
               <section className="py-8 border-b border-gray-100">
@@ -1452,6 +1468,20 @@ export default function PerfilClient({
                 setSeleccionada={handleSeleccionarFecha}
               />
             </section>
+
+            {/* ── Panel de reserva INLINE para mobile — AHORA va DEBAJO del calendario ──
+                  Así el flujo natural es: ver disponibilidad → elegir fecha →
+                  ver el botón justo abajo → reservar. El botón empieza deshabilitado
+                  (gris) y se activa al seleccionar una fecha. */}
+            <div className="lg:hidden pb-6">
+              <ReservaPanel
+                proveedor={proveedor}
+                fechaSeleccionada={fechaSeleccionada}
+                onReservar={handleReservar}
+                error={errorReserva}
+                requiereFecha
+              />
+            </div>
 
           </div>
 
