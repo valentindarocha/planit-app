@@ -32,6 +32,7 @@ interface PerfilData {
   precioTotal:     string;
   precioSena:      string;
   ubicacion?:      string;
+  telefono:        string;   // OBLIGATORIO — los organizadores lo usan post-reserva
   especialidades:  string[];
   fotoPerfil?:     string;
   mpAlias?:        string;
@@ -451,21 +452,32 @@ function SeccionResumen({
     .sort((a, b) => a.fecha.localeCompare(b.fecha))[0];
 
   // Ingresos del mes: suma de monto_sena de reservas confirmadas cuyo evento
-  // cae en el mes y año actuales.
+  // cae en el mes y año actuales. Se descuenta el 10% de comisión de PLANIT
+  // para mostrar el monto NETO que cobra el proveedor.
+  const COMISION_PLANIT = 0.10;
   const mesActual = hoy.getMonth();
   const anioActual = hoy.getFullYear();
-  const ingresosMes = solicitudes
+  const ingresosBrutos = solicitudes
     .filter((s) => {
       if (s.estado !== "confirmada" || !s.fecha) return false;
       const d = new Date(s.fecha + "T00:00:00");
       return d.getMonth() === mesActual && d.getFullYear() === anioActual;
     })
     .reduce((acc, s) => acc + s.montoSena, 0);
-  const ingresosMesStr = ingresosMes > 0
-    ? `$${ingresosMes.toLocaleString("es-AR")}`
+  const ingresosNetos = Math.round(ingresosBrutos * (1 - COMISION_PLANIT));
+  const ingresosMesStr = ingresosNetos > 0
+    ? `$${ingresosNetos.toLocaleString("es-AR")}`
     : "$0";
 
-  const metricas = [
+  const metricas: Array<{
+    label: string;
+    valor: string;
+    icono: React.ReactNode;
+    color: string;
+    bg: string;
+    accion: (() => void) | null;
+    subtitulo?: string;
+  }> = [
     {
       label: "Solicitudes pendientes",
       valor: String(pendientes),
@@ -497,6 +509,7 @@ function SeccionResumen({
       color: "#0EA5E9",
       bg: "#E0F2FE",
       accion: null,
+      subtitulo: "Monto neto después de la comisión del 10% de PLANIT.",
     },
   ];
 
@@ -527,6 +540,12 @@ function SeccionResumen({
                 style={{ fontFamily: "var(--font-poppins)" }}>
                 {m.label}
               </span>
+              {m.subtitulo && (
+                <span className="text-[10px] text-gray-400 leading-snug mt-1"
+                  style={{ fontFamily: "var(--font-poppins)" }}>
+                  {m.subtitulo}
+                </span>
+              )}
             </div>
           </button>
         ))}
@@ -978,6 +997,7 @@ function SeccionPerfil({
   const [perfil, setPerfil]     = useState<PerfilData>(initialPerfil);
   const [fotos, setFotos]       = useState<string[]>(FOTOS_INICIALES_PROVEEDOR);
   const [guardando, setGuardando] = useState(false);
+  const [errorTelefono, setErrorTelefono] = useState<string | null>(null);
 
   function actualizar<K extends keyof PerfilData>(k: K, v: PerfilData[K]) {
     setPerfil((p) => ({ ...p, [k]: v }));
@@ -1007,6 +1027,18 @@ function SeccionPerfil({
   }
 
   async function guardarEnDB() {
+    /* Validación: el teléfono es obligatorio */
+    if (!perfil.telefono.trim()) {
+      setErrorTelefono("El teléfono es obligatorio para que los organizadores puedan contactarte.");
+      // Hacer scroll hacia el campo si está fuera de vista
+      if (typeof window !== "undefined") {
+        const el = document.getElementById("input-telefono-proveedor");
+        el?.scrollIntoView({ behavior: "smooth", block: "center" });
+      }
+      return;
+    }
+    setErrorTelefono(null);
+
     setGuardando(true);
 
     // UPDATE principal: SOLO columnas que SIEMPRE existen en Profiles
@@ -1028,6 +1060,8 @@ function SeccionPerfil({
         ["descripcion", perfil.descripcion?.trim() || null],
         ["ubicacion",   perfil.ubicacion?.trim()   || null],
         ["mp_alias",    perfil.mpAlias?.trim()     || null],
+        ["telefono",    perfil.telefono.trim()     || null],   // minúscula
+        ["Telefono",    perfil.telefono.trim()     || null],   // mayúscula (por compat)
       ];
       for (const [col, val] of opcionales) {
         await supabase
@@ -1176,6 +1210,35 @@ function SeccionPerfil({
             placeholder="Ej: CABA y GBA Norte"
             {...inputFocus}
           />
+        </div>
+
+        {/* Teléfono — OBLIGATORIO */}
+        <div className="flex flex-col gap-1.5">
+          <label className="text-xs font-semibold text-gray-700 flex items-center gap-1">
+            Teléfono <span style={{ color: "#DC2626" }}>*</span>
+          </label>
+          <input
+            id="input-telefono-proveedor"
+            type="tel"
+            className={inputCls}
+            style={errorTelefono ? { borderColor: "#DC2626", backgroundColor: "#FEF2F2" } : undefined}
+            value={perfil.telefono}
+            onChange={(e) => {
+              actualizar("telefono", e.target.value);
+              if (errorTelefono) setErrorTelefono(null);
+            }}
+            placeholder="Ej: 11-2233-4455"
+            {...inputFocus}
+          />
+          <p className="text-[10px] text-gray-500 leading-snug">
+            Tu número de teléfono es obligatorio. Los organizadores lo usarán para
+            contactarte directamente una vez confirmada la reserva.
+          </p>
+          {errorTelefono && (
+            <p className="text-[11px] font-semibold mt-0.5" style={{ color: "#DC2626" }}>
+              {errorTelefono}
+            </p>
+          )}
         </div>
 
         {/* Especialidades */}
@@ -1403,10 +1466,12 @@ export default function PanelProveedorPage() {
           if (error || !data) return "";
           return (data as unknown as Record<string, string | null>)[col] ?? "";
         }
-        const [descripcion, ubicacion, mpAlias] = await Promise.all([
+        const [descripcion, ubicacion, mpAlias, telefonoLower, telefonoUpper] = await Promise.all([
           fetchOpt("descripcion"),
           fetchOpt("ubicacion"),
           fetchOpt("mp_alias"),
+          fetchOpt("telefono"),
+          fetchOpt("Telefono"),
         ]);
 
         setPerfilData({
@@ -1416,6 +1481,7 @@ export default function PanelProveedorPage() {
           precioTotal:   profile?.precio_servicio != null ? String(profile.precio_servicio) : "",
           precioSena:    profile?.monto_sena      != null ? String(profile.monto_sena)      : "",
           ubicacion,
+          telefono:      telefonoLower || telefonoUpper || "",   // intenta minúscula y mayúscula
           especialidades: Array.isArray(profile?.especialidades) ? profile.especialidades : [],
           fotoPerfil:    profile?.foto_perfil         ?? "",
           mpAlias,

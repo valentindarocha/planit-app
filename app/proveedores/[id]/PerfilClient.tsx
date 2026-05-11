@@ -1320,7 +1320,8 @@ export default function PerfilClient({
                     para que coordinen los detalles del evento.
                   </p>
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mt-1">
-                    {contacto.email && (
+                    {/* Email — siempre visible, con fallback en gris */}
+                    {contacto.email ? (
                       <a
                         href={`mailto:${contacto.email}`}
                         className="flex items-center gap-2 px-3 py-2.5 rounded-xl bg-white border hover:border-orange-400 transition-colors"
@@ -1337,8 +1338,26 @@ export default function PerfilClient({
                           <span className="text-xs font-semibold text-gray-700 truncate">{contacto.email}</span>
                         </div>
                       </a>
+                    ) : (
+                      <div
+                        className="flex items-center gap-2 px-3 py-2.5 rounded-xl bg-gray-50 border"
+                        style={{ borderColor: "#E5E7EB" }}
+                      >
+                        <span
+                          className="w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0 text-gray-400"
+                          style={{ backgroundColor: "#F3F4F6" }}
+                        >
+                          ✉
+                        </span>
+                        <div className="flex flex-col min-w-0">
+                          <span className="text-[10px] font-semibold text-gray-400 uppercase tracking-wide">Email</span>
+                          <span className="text-xs italic text-gray-400">Email no disponible</span>
+                        </div>
+                      </div>
                     )}
-                    {contacto.telefono && (
+
+                    {/* Teléfono — siempre visible, con fallback en gris */}
+                    {contacto.telefono ? (
                       <a
                         href={`tel:${contacto.telefono}`}
                         className="flex items-center gap-2 px-3 py-2.5 rounded-xl bg-white border hover:border-orange-400 transition-colors"
@@ -1355,12 +1374,22 @@ export default function PerfilClient({
                           <span className="text-xs font-semibold text-gray-700 truncate">{contacto.telefono}</span>
                         </div>
                       </a>
-                    )}
-                    {!contacto.email && !contacto.telefono && (
-                      <p className="text-xs text-gray-500 italic col-span-2">
-                        El proveedor todavía no completó sus datos de contacto. Te recomendamos
-                        avisarle por la plataforma.
-                      </p>
+                    ) : (
+                      <div
+                        className="flex items-center gap-2 px-3 py-2.5 rounded-xl bg-gray-50 border"
+                        style={{ borderColor: "#E5E7EB" }}
+                      >
+                        <span
+                          className="w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0 text-gray-400"
+                          style={{ backgroundColor: "#F3F4F6" }}
+                        >
+                          ☏
+                        </span>
+                        <div className="flex flex-col min-w-0">
+                          <span className="text-[10px] font-semibold text-gray-400 uppercase tracking-wide">Teléfono</span>
+                          <span className="text-xs italic text-gray-400">Teléfono no disponible</span>
+                        </div>
+                      </div>
                     )}
                   </div>
                 </div>

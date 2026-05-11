@@ -164,7 +164,7 @@ function Input({
   suffix,
   disabled,
 }: {
-  label: string;
+  label: React.ReactNode;       // permite JSX (ej. asterisco rojo)
   type?: string;
   placeholder?: string;
   value: string;
@@ -511,12 +511,13 @@ function FormRegistro({
   const [confirm, setConfirm]     = useState("");
   const [categoria, setCategoria] = useState("");
   const [mpAlias, setMpAlias]     = useState("");
+  const [telefono, setTelefono]   = useState("");
   const [showPass, setShowPass]   = useState(false);
   const [showConf, setShowConf]   = useState(false);
   const [cargando, setCargando]   = useState(false);
   const [errorServer, setErrorServer] = useState<string | null>(null);
 
-  type CampoReg = "nombre" | "email" | "password" | "confirm" | "categoria" | "rol" | "mpAlias";
+  type CampoReg = "nombre" | "email" | "password" | "confirm" | "categoria" | "rol" | "mpAlias" | "telefono";
   const [errores, setErrores] = useState<Partial<Record<CampoReg, string>>>({});
 
   function limpiarError(campo: CampoReg) {
@@ -546,6 +547,9 @@ function FormRegistro({
     if (!confirm)                   e2.confirm  = "Confirmá tu contraseña";
     else if (confirm !== password)  e2.confirm  = "Las contraseñas no coinciden";
     if (rol === "proveedor" && !categoria) e2.categoria = "Seleccioná tu categoría de servicio";
+    if (rol === "proveedor" && !telefono.trim()) {
+      e2.telefono = "El teléfono es obligatorio para que los organizadores puedan contactarte.";
+    }
 
     setErrores(e2);
     if (Object.keys(e2).length > 0) return;
@@ -589,6 +593,14 @@ function FormRegistro({
           .from("Profiles")
           .update({ mp_alias: mpAlias.trim() })
           .eq("ID", userId);
+      }
+
+      // 3b. Guardar teléfono del proveedor (obligatorio para proveedores).
+      //     Lo intentamos en ambas variantes de nombre de columna por compat.
+      if (!profileError && rol === "proveedor" && telefono.trim()) {
+        const tel = telefono.trim();
+        await supabase.from("Profiles").update({ telefono: tel }).eq("ID", userId);
+        await supabase.from("Profiles").update({ Telefono: tel }).eq("ID", userId);
       }
 
       // 4. Si no hay sesión activa es porque Supabase requiere confirmación de email
@@ -749,6 +761,27 @@ function FormRegistro({
                 error={errores.categoria}
                 disabled={cargando}
               />
+
+              {/* Teléfono — OBLIGATORIO para proveedores */}
+              <div className="flex flex-col gap-1.5">
+                <Input
+                  label={
+                    <span className="flex items-center gap-1">
+                      Teléfono <span style={{ color: "#DC2626" }}>*</span>
+                    </span>
+                  }
+                  placeholder="Ej: 11-2233-4455"
+                  value={telefono}
+                  onChange={(v) => { setTelefono(v); limpiarError("telefono"); }}
+                  error={errores.telefono}
+                  disabled={cargando}
+                />
+                <p className="text-[10px] text-gray-500 leading-snug" style={{ fontFamily: "var(--font-poppins)" }}>
+                  Tu número de teléfono es obligatorio. Los organizadores lo usarán
+                  para contactarte directamente una vez confirmada la reserva.
+                </p>
+              </div>
+
               <div className="flex flex-col gap-1.5">
                 <Input
                   label="Alias de Mercado Pago"

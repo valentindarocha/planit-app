@@ -418,8 +418,9 @@ function DetalleReservaModal({
               </p>
             </div>
 
-            {/* Datos de contacto — solo si la reserva está confirmada */}
-            {reserva.estado === "confirmada" && (reserva.proveedorEmail || reserva.proveedorTelefono) && (
+            {/* Datos de contacto — siempre que la reserva esté confirmada,
+                  aunque algún dato falte (mostramos fallback en gris) */}
+            {reserva.estado === "confirmada" && (
               <div
                 className="col-span-2 p-3 rounded-xl border flex flex-col gap-2"
                 style={{ borderColor: "#BBF7D0", backgroundColor: "#F0FDF4" }}
@@ -429,17 +430,29 @@ function DetalleReservaModal({
                   Datos de contacto del proveedor
                 </span>
                 <div className="flex flex-col gap-1.5">
-                  {reserva.proveedorEmail && (
+                  {/* Email */}
+                  {reserva.proveedorEmail ? (
                     <a href={`mailto:${reserva.proveedorEmail}`} className="text-sm text-gray-700 hover:text-orange-600 transition-colors flex items-center gap-2">
                       <span className="text-gray-400">✉</span>
                       <span className="font-semibold truncate">{reserva.proveedorEmail}</span>
                     </a>
+                  ) : (
+                    <div className="text-sm flex items-center gap-2" style={{ color: "#9CA3AF" }}>
+                      <span>✉</span>
+                      <span className="italic">Email no disponible</span>
+                    </div>
                   )}
-                  {reserva.proveedorTelefono && (
+                  {/* Teléfono */}
+                  {reserva.proveedorTelefono ? (
                     <a href={`tel:${reserva.proveedorTelefono}`} className="text-sm text-gray-700 hover:text-orange-600 transition-colors flex items-center gap-2">
                       <span className="text-gray-400">☏</span>
                       <span className="font-semibold">{reserva.proveedorTelefono}</span>
                     </a>
+                  ) : (
+                    <div className="text-sm flex items-center gap-2" style={{ color: "#9CA3AF" }}>
+                      <span>☏</span>
+                      <span className="italic">Teléfono no disponible</span>
+                    </div>
                   )}
                 </div>
               </div>
