@@ -379,6 +379,17 @@ function FormLogin({
         }
       />
 
+      {/* Link de recuperación de contraseña */}
+      <div className="flex justify-end -mt-2">
+        <Link
+          href="/restablecer-contrasena"
+          className="text-xs font-semibold hover:underline transition-colors"
+          style={{ color: "#E8731A", fontFamily: "var(--font-poppins)" }}
+        >
+          ¿Olvidaste tu contraseña?
+        </Link>
+      </div>
+
       {/* Error de servidor */}
       {errorServer && (
         <div
