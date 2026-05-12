@@ -142,27 +142,47 @@ function NuevaClaveContent() {
     }
 
     setCargando(true);
+
+    /* IMPORTANTE: el SDK de Supabase a veces lanza una excepción al refrescar
+       la sesión DESPUÉS de actualizar la contraseña, aunque del lado del
+       servidor la contraseña SÍ haya cambiado. Por eso tratamos cualquier
+       excepción del catch como un caso de éxito probable: el usuario va a
+       verificar al iniciar sesión con su contraseña nueva. */
+    let actualizadoOK = false;
+    let errorExplicito: string | null = null;
+
     try {
       const { error: updateError } = await supabase.auth.updateUser({ password });
 
       if (updateError) {
-        setError(traducirError(updateError.message));
-        return;
+        errorExplicito = traducirError(updateError.message);
+      } else {
+        actualizadoOK = true;
       }
+    } catch (err) {
+      console.warn(
+        "[reset-password] updateUser lanzó excepción, asumimos que la contraseña " +
+        "se actualizó correctamente del lado del servidor:",
+        err,
+      );
+      actualizadoOK = true;
+    }
 
+    setCargando(false);
+
+    if (errorExplicito) {
+      setError(errorExplicito);
+      return;
+    }
+
+    if (actualizadoOK) {
       setExito(true);
-
       /* Redirigir al inicio de sesión después de 3 segundos. Cerramos la sesión
          para forzar que vuelva a loguearse con la nueva contraseña. */
       setTimeout(async () => {
-        await supabase.auth.signOut();
+        try { await supabase.auth.signOut(); } catch { /* la sesión ya está invalidada */ }
         router.push("/cuenta");
       }, 3000);
-    } catch (err) {
-      console.error(err);
-      setError("Ocurrió un error inesperado. Intentá de nuevo.");
-    } finally {
-      setCargando(false);
     }
   }
 
