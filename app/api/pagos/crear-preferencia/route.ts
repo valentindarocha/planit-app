@@ -111,6 +111,10 @@ export async function POST(request: NextRequest) {
         pending: `${BASE_URL}/reserva/pendiente?reserva_id=${reserva_id}`,
       },
       auto_return:          "approved" as const,
+      /* MP llama a este endpoint cuando hay un cambio de estado en el pago.
+         Sirve para confirmar la reserva incluso si el usuario cierra la
+         pestaña antes de volver a /reserva/exito. */
+      notification_url:     `${BASE_URL}/api/pagos/webhook`,
       external_reference:   String(reserva_id),
       statement_descriptor: "PLANIT",
       metadata: { reserva_id, proveedor_nombre, fecha_evento },
