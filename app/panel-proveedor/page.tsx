@@ -1495,10 +1495,13 @@ export default function PanelProveedorPage() {
           .order("created_at", { ascending: false });
 
         if (rows && rows.length > 0) {
-          // 3. Resolver nombres de clientes
+          // 3. Resolver nombres de clientes vía la VIEW pública.
+          //    Por RLS estricto, el proveedor no puede leer la tabla Profiles
+          //    de sus clientes; pero la view no expone Email/Telefono, solo
+          //    el Nombre, que es lo que necesitamos mostrar.
           const clienteIds = [...new Set(rows.map((r: any) => r.usuario_id).filter(Boolean))];
           const { data: clientes } = await supabase
-            .from("Profiles")
+            .from("profiles_publico")
             .select("ID, Nombre")
             .in("ID", clienteIds);
 

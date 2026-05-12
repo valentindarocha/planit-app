@@ -15,10 +15,10 @@ export default async function PerfilPage({
 }) {
   const { id } = await params;
 
-  /* ── Proveedor real en Supabase (UUID) ── */
+  /* ── Proveedor real en Supabase (UUID) — vía VIEW pública sin contacto ── */
   if (isUUID(id)) {
     const { data: perfil } = await supabase
-      .from("Profiles")
+      .from("profiles_publico")
       .select("*")
       .eq("ID", id)
       .eq("tipo_cuenta", "proveedor")

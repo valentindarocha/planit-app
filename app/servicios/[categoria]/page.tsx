@@ -58,9 +58,9 @@ export default async function CategoriaPage({
   const nombreCategoria = categoriaNombres[categoria];
   if (!nombreCategoria) notFound();
 
-  /* Proveedores reales desde Supabase */
+  /* Proveedores reales desde Supabase (vía VIEW pública sin Email/Telefono) */
   const { data: perfilesReales } = await supabase
-    .from("Profiles")
+    .from("profiles_publico")
     .select("*")
     .eq("tipo_cuenta", "proveedor")
     .eq("categoria_servicio", categoria);

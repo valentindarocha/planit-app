@@ -96,9 +96,10 @@ function ExitoContent() {
 
         setReserva(data as DatosReserva);
 
-        /* 4. Nombre del proveedor */
+        /* 4. Nombre del proveedor — desde la VIEW pública (no necesita acceso
+              a la tabla Profiles, que está restringida por RLS) */
         const { data: provData } = await supabase
-          .from("Profiles")
+          .from("profiles_publico")
           .select("Nombre")
           .eq("ID", data.proveedor_id)
           .single();

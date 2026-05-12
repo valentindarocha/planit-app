@@ -1361,14 +1361,26 @@ export default function PanelOrganizadorPage() {
           const provMap         = new Map<string, string>();
           const contactoMap     = new Map<string, { email: string; telefono: string }>();
 
-          // UUIDs reales → buscar nombre + contacto en Supabase Profiles
+          // UUIDs reales → 2 queries separadas:
+          // (a) NOMBRES desde la view pública (siempre accesible).
+          // (b) CONTACTO desde Profiles directo (RLS solo lo deja pasar si
+          //     el organizador tiene una reserva confirmada con ese proveedor).
           if (uuids.length > 0) {
-            const { data: provs } = await supabase
-              .from("Profiles")
-              .select("ID, Nombre, Email, Telefono, telefono")
+            // (a) Nombres
+            const { data: publicProvs } = await supabase
+              .from("profiles_publico")
+              .select("ID, Nombre")
               .in("ID", uuids);
-            provs?.forEach((p: { ID: string; Nombre: string | null; Email?: string; Telefono?: string; telefono?: string }) => {
+            publicProvs?.forEach((p: { ID: string; Nombre: string | null }) => {
               provMap.set(p.ID, p.Nombre ?? "Proveedor");
+            });
+
+            // (b) Contacto — RLS filtra automáticamente
+            const { data: contactProvs } = await supabase
+              .from("Profiles")
+              .select("ID, Email, Telefono, telefono")
+              .in("ID", uuids);
+            contactProvs?.forEach((p: { ID: string; Email?: string; Telefono?: string; telefono?: string }) => {
               contactoMap.set(p.ID, {
                 email:    p.Email ?? "",
                 telefono: p.Telefono || p.telefono || "",
