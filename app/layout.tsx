@@ -18,6 +18,18 @@ const poppins = Poppins({
 });
 
 /* ─────────────────────────────────────────────
+   URL pública de la app — fuente única de verdad.
+   Viene de NEXT_PUBLIC_APP_URL (configurada en Vercel y .env.local).
+   Si en algún momento la env var no existe, caemos al dominio actual
+   como fallback para evitar runtime errors.
+
+   IMPORTANTE: cuando se cambie el dominio, NO toques este archivo —
+   simplemente actualizá la env var NEXT_PUBLIC_APP_URL en Vercel.
+─────────────────────────────────────────────── */
+const APP_URL =
+  process.env.NEXT_PUBLIC_APP_URL ?? "https://planit-app-fgi6.vercel.app";
+
+/* ─────────────────────────────────────────────
    Metadata global de PLANIT
    - title con template: cada página puede sobreescribir el título
      y se compone como "Mi página | PLANIT"
@@ -27,7 +39,7 @@ const poppins = Poppins({
      app/opengraph-image.tsx — Next.js la inyecta sola
 ─────────────────────────────────────────────── */
 export const metadata: Metadata = {
-  metadataBase: new URL("https://planit-app-fgi6.vercel.app"),
+  metadataBase: new URL(APP_URL),
   title: {
     default: "PLANIT — Tu evento en un solo lugar",
     template: "%s · PLANIT",
@@ -54,7 +66,7 @@ export const metadata: Metadata = {
   openGraph: {
     type: "website",
     locale: "es_AR",
-    url: "https://planit-app-fgi6.vercel.app",
+    url: APP_URL,
     siteName: "PLANIT",
     title: "PLANIT — Tu evento en un solo lugar",
     description:
@@ -73,7 +85,7 @@ export const metadata: Metadata = {
     follow: true,
   },
   alternates: {
-    canonical: "https://planit-app-fgi6.vercel.app",
+    canonical: APP_URL,
   },
 };
 
