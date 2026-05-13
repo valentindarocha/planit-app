@@ -25,6 +25,17 @@ export default async function PerfilPage({
       .single();
 
     if (perfil) {
+      /* Cargar fotos del portfolio del proveedor (ordenadas por campo orden) */
+      const { data: portfolioFotos } = await supabase
+        .from("portafolio_fotos")
+        .select("url, orden")
+        .eq("proveedor_id", id)
+        .order("orden", { ascending: true });
+
+      const galeriaUrls: string[] = (portfolioFotos ?? []).map(
+        (f: { url: string }) => f.url,
+      );
+
       const proveedor: Proveedor = {
         id:                perfil.ID,
         nombre:            perfil.Nombre,
@@ -41,7 +52,10 @@ export default async function PerfilPage({
         especialidades:    perfil.especialidades ?? [],
         eventosRealizados: perfil.eventos_realizados ?? 0,
         descripcion:       perfil.descripcion ?? "Proveedor de servicios para eventos en PLANIT.",
-        galeria:           perfil.foto_perfil ? [perfil.foto_perfil] : [],
+        /* Galería: viene de la tabla portafolio_fotos.
+           Si el proveedor todavía no subió fotos, queda como [].
+           El frontend muestra un mensaje neutro en lugar de duplicar la foto de perfil. */
+        galeria:           galeriaUrls,
         fechasOcupadas:    [],
       };
 

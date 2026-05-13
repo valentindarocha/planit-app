@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { useAuth } from "../contexts/AuthContext";
@@ -58,9 +58,61 @@ function mapSolicitudDB(row: any, clienteNombre: string): Solicitud {
 
 const FECHAS_BLOQUEADAS_INICIALES: string[] = [];
 
-const FOTOS_INICIALES_PROVEEDOR: string[] = [];
+/* Portfolio: cuántas fotos puede tener un proveedor como máximo */
+const MAX_FOTOS_PORTFOLIO = 8;
 
-const FOTOS_NUEVAS_POOL: string[] = [];
+/* Bytes máximos del archivo original (antes de compresión).
+   10 MB es razonable para fotos del celular. */
+const MAX_BYTES_ARCHIVO = 10 * 1024 * 1024;
+
+/* Tipo de cada foto del portfolio (lo que devuelve la tabla portafolio_fotos) */
+type FotoPortfolio = {
+  id:           number;
+  url:          string;
+  storage_path: string;
+  orden:        number;
+};
+
+/* ─────────────────────────────────────────────
+   Helper: comprime una imagen del lado del cliente.
+   - Redimensiona el lado más largo a maxSize px (1600 por defecto)
+   - Convierte a JPEG con calidad 0.85
+   - Reduce típicamente 5-10 MB de celular a 200-400 KB
+───────────────────────────────────────────── */
+async function comprimirImagen(file: File, maxSize = 1600, quality = 0.85): Promise<Blob> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      const img = new Image();
+      img.onload = () => {
+        let w = img.width;
+        let h = img.height;
+        if (w > h && w > maxSize) {
+          h = Math.round((h * maxSize) / w);
+          w = maxSize;
+        } else if (h > maxSize) {
+          w = Math.round((w * maxSize) / h);
+          h = maxSize;
+        }
+        const canvas = document.createElement("canvas");
+        canvas.width = w;
+        canvas.height = h;
+        const ctx = canvas.getContext("2d");
+        if (!ctx) return reject(new Error("Sin contexto canvas"));
+        ctx.drawImage(img, 0, 0, w, h);
+        canvas.toBlob(
+          (blob) => (blob ? resolve(blob) : reject(new Error("Compresión falló"))),
+          "image/jpeg",
+          quality,
+        );
+      };
+      img.onerror = () => reject(new Error("No se pudo leer la imagen"));
+      img.src = e.target?.result as string;
+    };
+    reader.onerror = () => reject(new Error("FileReader falló"));
+    reader.readAsDataURL(file);
+  });
+}
 
 const TODAS_ESPECIALIDADES = [
   "Bodas",
@@ -995,9 +1047,31 @@ function SeccionPerfil({
   onPerfilGuardado: (p: PerfilData) => void;
 }) {
   const [perfil, setPerfil]     = useState<PerfilData>(initialPerfil);
-  const [fotos, setFotos]       = useState<string[]>(FOTOS_INICIALES_PROVEEDOR);
+  const [fotos, setFotos]       = useState<FotoPortfolio[]>([]);
+  const [subiendoFoto, setSubiendoFoto] = useState(false);
   const [guardando, setGuardando] = useState(false);
   const [errorTelefono, setErrorTelefono] = useState<string | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  /* Cargar fotos existentes del portfolio cuando montamos el componente */
+  useEffect(() => {
+    if (!userId) return;
+    let cancelado = false;
+    (async () => {
+      const { data, error } = await supabase
+        .from("portafolio_fotos")
+        .select("id, url, storage_path, orden")
+        .eq("proveedor_id", userId)
+        .order("orden", { ascending: true });
+      if (cancelado) return;
+      if (error) {
+        console.error("[Portfolio] cargar fotos:", error);
+        return;
+      }
+      setFotos((data ?? []) as FotoPortfolio[]);
+    })();
+    return () => { cancelado = true; };
+  }, [userId]);
 
   function actualizar<K extends keyof PerfilData>(k: K, v: PerfilData[K]) {
     setPerfil((p) => ({ ...p, [k]: v }));
@@ -1012,18 +1086,117 @@ function SeccionPerfil({
     }));
   }
 
-  function eliminarFoto(idx: number) {
-    setFotos((prev) => prev.filter((_, i) => i !== idx));
-  }
-
-  function agregarFoto() {
-    if (FOTOS_NUEVAS_POOL.length === 0) {
-      onToast("Subida de fotos no disponible en este momento");
+  /* Disparar el file picker desde el botón */
+  function pedirArchivo() {
+    if (subiendoFoto) return;
+    if (fotos.length >= MAX_FOTOS_PORTFOLIO) {
+      onToast(`Llegaste al máximo de ${MAX_FOTOS_PORTFOLIO} fotos`, "error");
       return;
     }
-    const nueva = FOTOS_NUEVAS_POOL[fotos.length % FOTOS_NUEVAS_POOL.length];
-    setFotos((prev) => [...prev, nueva]);
-    onToast("Foto agregada correctamente");
+    fileInputRef.current?.click();
+  }
+
+  /* Procesa el archivo elegido por el usuario: valida, comprime,
+     sube al Storage y registra en la tabla. */
+  async function handleArchivoSeleccionado(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    e.target.value = "";  // reset para poder volver a elegir el mismo archivo
+    if (!file) return;
+
+    if (!file.type.startsWith("image/")) {
+      onToast("Solo se admiten imágenes (JPG, PNG, etc)", "error");
+      return;
+    }
+    if (file.size > MAX_BYTES_ARCHIVO) {
+      onToast("La imagen es demasiado pesada (máx 10 MB)", "error");
+      return;
+    }
+    if (fotos.length >= MAX_FOTOS_PORTFOLIO) {
+      onToast(`Llegaste al máximo de ${MAX_FOTOS_PORTFOLIO} fotos`, "error");
+      return;
+    }
+
+    setSubiendoFoto(true);
+    let pathSubido: string | null = null;
+
+    try {
+      // 1. Comprimir
+      const blob = await comprimirImagen(file);
+
+      // 2. Generar path único en el Storage
+      const ext = "jpg";
+      const path = `${userId}/${Date.now()}-${Math.random().toString(36).slice(2, 8)}.${ext}`;
+
+      // 3. Subir al Storage
+      const { error: upErr } = await supabase.storage
+        .from("portafolios")
+        .upload(path, blob, { contentType: "image/jpeg", upsert: false });
+
+      if (upErr) throw upErr;
+      pathSubido = path;
+
+      // 4. Obtener URL pública
+      const { data: { publicUrl } } = supabase.storage
+        .from("portafolios")
+        .getPublicUrl(path);
+
+      // 5. Insertar fila en la tabla
+      const ordenSiguiente = fotos.length > 0
+        ? Math.max(...fotos.map((f) => f.orden)) + 1
+        : 0;
+
+      const { data: inserted, error: dbErr } = await supabase
+        .from("portafolio_fotos")
+        .insert({
+          proveedor_id: userId,
+          url:          publicUrl,
+          storage_path: path,
+          orden:        ordenSiguiente,
+        })
+        .select("id, url, storage_path, orden")
+        .single();
+
+      if (dbErr) throw dbErr;
+
+      setFotos((prev) => [...prev, inserted as FotoPortfolio]);
+      onToast("Foto agregada al portfolio");
+    } catch (err) {
+      console.error("[Portfolio] subir foto:", err);
+      // Cleanup: si subimos al Storage pero falló la DB, borramos el huérfano
+      if (pathSubido) {
+        await supabase.storage.from("portafolios").remove([pathSubido]).catch(() => {});
+      }
+      onToast("No se pudo subir la foto. Intentá de nuevo.", "error");
+    } finally {
+      setSubiendoFoto(false);
+    }
+  }
+
+  /* Eliminar una foto (de la DB y del Storage) */
+  async function eliminarFoto(foto: FotoPortfolio) {
+    if (!window.confirm("¿Eliminar esta foto del portfolio?")) return;
+
+    try {
+      // 1. Borrar de la tabla (RLS valida que sea el dueño)
+      const { error: dbErr } = await supabase
+        .from("portafolio_fotos")
+        .delete()
+        .eq("id", foto.id);
+
+      if (dbErr) throw dbErr;
+
+      // 2. Borrar del Storage (no es crítico si falla — la DB ya está limpia)
+      await supabase.storage
+        .from("portafolios")
+        .remove([foto.storage_path])
+        .catch((e) => console.warn("[Portfolio] storage remove falló:", e));
+
+      setFotos((prev) => prev.filter((f) => f.id !== foto.id));
+      onToast("Foto eliminada");
+    } catch (err) {
+      console.error("[Portfolio] eliminar foto:", err);
+      onToast("No se pudo eliminar la foto", "error");
+    }
   }
 
   async function guardarEnDB() {
@@ -1358,18 +1531,27 @@ function SeccionPerfil({
           <div>
             <h3 className="text-base font-bold text-gray-800">Mis fotos / Portfolio</h3>
             <p className="text-[11px] text-gray-400 mt-0.5">
-              Las fotos que subas aparecerán en tu perfil público
+              Las fotos aparecen en tu perfil público — hasta {MAX_FOTOS_PORTFOLIO}.
             </p>
           </div>
           <button
             type="button"
-            onClick={agregarFoto}
-            className="flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-semibold text-white transition-opacity hover:opacity-80"
+            onClick={pedirArchivo}
+            disabled={subiendoFoto || fotos.length >= MAX_FOTOS_PORTFOLIO}
+            className="flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-semibold text-white transition-opacity hover:opacity-80 disabled:opacity-60 disabled:cursor-not-allowed"
             style={{ backgroundColor: "#E8731A" }}
           >
             <IconCamera />
-            Agregar foto
+            {subiendoFoto ? "Subiendo..." : "Agregar foto"}
           </button>
+          {/* File input oculto — se dispara desde el botón */}
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept="image/*"
+            className="hidden"
+            onChange={handleArchivoSeleccionado}
+          />
         </div>
 
         {fotos.length === 0 ? (
@@ -1378,19 +1560,19 @@ function SeccionPerfil({
           </div>
         ) : (
           <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3">
-            {fotos.map((url, idx) => (
-              <div key={idx} className="relative group aspect-square rounded-xl overflow-hidden bg-gray-100">
+            {fotos.map((foto, idx) => (
+              <div key={foto.id} className="relative group aspect-square rounded-xl overflow-hidden bg-gray-100">
                 {/* eslint-disable-next-line @next/next/no-img-element */}
                 <img
-                  src={url}
+                  src={foto.url}
                   alt={`Foto ${idx + 1}`}
                   className="w-full h-full object-cover"
                 />
-                {/* Overlay hover */}
+                {/* Overlay hover con botón eliminar */}
                 <div className="absolute inset-0 bg-black/0 group-hover:bg-black/45 transition-all duration-200 flex items-center justify-center">
                   <button
                     type="button"
-                    onClick={() => eliminarFoto(idx)}
+                    onClick={() => eliminarFoto(foto)}
                     aria-label="Eliminar foto"
                     className="opacity-0 group-hover:opacity-100 transition-opacity duration-200 w-9 h-9 rounded-full bg-red-500 text-white flex items-center justify-center hover:bg-red-600 shadow-lg"
                   >
@@ -1403,7 +1585,7 @@ function SeccionPerfil({
         )}
 
         <p className="text-[10px] text-gray-400">
-          {fotos.length} foto{fotos.length !== 1 ? "s" : ""} en tu portfolio · La carga real se habilitará próximamente
+          {fotos.length} / {MAX_FOTOS_PORTFOLIO} fotos en tu portfolio
         </p>
       </div>
     </div>

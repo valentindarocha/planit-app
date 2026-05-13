@@ -1753,17 +1753,35 @@ export default function PerfilClient({
               <h2 className="text-xl font-bold text-gray-800 mb-4" style={{ fontFamily: "var(--font-poppins)" }}>
                 Galería de trabajos
               </h2>
-              <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-                {proveedor.galeria.map((img, i) => (
-                  // eslint-disable-next-line @next/next/no-img-element
-                  <img
-                    key={i}
-                    src={img}
-                    alt={`${proveedor.nombre} — trabajo ${i + 1}`}
-                    className="w-full aspect-square object-cover rounded-xl"
-                  />
-                ))}
-              </div>
+              {proveedor.galeria.length === 0 ? (
+                /* Proveedor real sin fotos cargadas todavía.
+                   Mostramos un estado neutro en lugar de un grid vacío. */
+                <div
+                  className="rounded-xl border-2 border-dashed p-8 text-center"
+                  style={{ borderColor: "#F0E0D0", backgroundColor: "#FFFAF6" }}
+                >
+                  <p className="text-sm text-gray-500" style={{ fontFamily: "var(--font-poppins)" }}>
+                    {proveedor.nombre} todavía no agregó fotos de su trabajo.
+                  </p>
+                  {esMock && (
+                    <p className="text-xs text-gray-400 mt-1" style={{ fontFamily: "var(--font-poppins)" }}>
+                      Pronto las vas a ver acá.
+                    </p>
+                  )}
+                </div>
+              ) : (
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                  {proveedor.galeria.map((img, i) => (
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img
+                      key={i}
+                      src={img}
+                      alt={`${proveedor.nombre} — trabajo ${i + 1}`}
+                      className="w-full aspect-square object-cover rounded-xl"
+                    />
+                  ))}
+                </div>
+              )}
             </section>
 
             {/* ── Sección 3: Descripción ── */}
