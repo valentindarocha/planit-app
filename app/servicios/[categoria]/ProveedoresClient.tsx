@@ -113,6 +113,21 @@ function ProveedorCard({ proveedor }: { proveedor: ProveedorUnificado }) {
             </span>
           </div>
         )}
+
+        {/* Badge "Perfil de muestra" — solo en proveedores mock */}
+        {proveedor.isMock && (
+          <span
+            className="absolute top-2 left-2 px-2.5 py-1 rounded-md text-xs font-semibold text-white"
+            style={{
+              backgroundColor: "rgba(0, 0, 0, 0.78)",
+              fontFamily: "var(--font-poppins)",
+              letterSpacing: "0.01em",
+              backdropFilter: "blur(4px)",
+            }}
+          >
+            Perfil de muestra
+          </span>
+        )}
       </div>
 
       <div className="flex flex-col flex-1 p-4 gap-2">

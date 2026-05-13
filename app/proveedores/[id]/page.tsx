@@ -34,7 +34,10 @@ export default async function PerfilPage({
         precioBase:        perfil.precio_servicio != null ? `Desde $${Number(perfil.precio_servicio).toLocaleString("es-AR")}` : "A consultar",
         precioTotal:       perfil.precio_servicio != null ? `$${Number(perfil.precio_servicio).toLocaleString("es-AR")}` : "A consultar",
         precioSena:        perfil.monto_sena != null ? `$${Number(perfil.monto_sena).toLocaleString("es-AR")}` : "A consultar",
-        rating:            perfil.rating ?? 5.0,
+        /* rating: si la view devuelve null (sin reseñas), pasamos 0.
+           El frontend (PerfilClient) detecta que es proveedor real con 0
+           reseñas y muestra el badge "Nuevo" en lugar de estrellas vacías. */
+        rating:            perfil.rating ?? 0,
         especialidades:    perfil.especialidades ?? [],
         eventosRealizados: perfil.eventos_realizados ?? 0,
         descripcion:       perfil.descripcion ?? "Proveedor de servicios para eventos en PLANIT.",

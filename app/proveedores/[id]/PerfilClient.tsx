@@ -396,9 +396,17 @@ function ReservaPanel({
 }
 
 /* ─────────────────────────────────────────────
-   Tarjeta de reseña
+   Tarjeta de reseña (para reseñas mock / simuladas)
 ───────────────────────────────────────────── */
-function ResenaCard({ resena }: { resena: Resena }) {
+function ResenaCard({
+  resena,
+  mostrarEtiquetaMuestra,
+}: {
+  resena: Resena;
+  /* Si true, agrega "Reseña de muestra" en gris al pie de la card.
+     Lo usamos para proveedores mock — son reseñas pre-cargadas, no reales. */
+  mostrarEtiquetaMuestra?: boolean;
+}) {
   return (
     <div
       className="rounded-xl p-5 border flex flex-col gap-3"
@@ -432,7 +440,243 @@ function ResenaCard({ resena }: { resena: Resena }) {
       <p className="text-sm text-gray-600 leading-relaxed italic">
         &ldquo;{resena.comentario}&rdquo;
       </p>
+
+      {/* Etiqueta de "Reseña de muestra" para mocks */}
+      {mostrarEtiquetaMuestra && (
+        <p className="text-[10px] text-gray-400 italic mt-1">
+          Reseña de muestra
+        </p>
+      )}
     </div>
+  );
+}
+
+/* ─────────────────────────────────────────────
+   Tipo y tarjeta de reseña REAL (tabla resenas)
+───────────────────────────────────────────── */
+type ResenaReal = {
+  id:           number;
+  puntuacion:   number;
+  comentario:   string | null;
+  created_at:   string;
+  autor_id:     string;
+  autor_nombre: string;
+};
+
+function formatearFechaResena(iso: string): string {
+  const d = new Date(iso);
+  if (isNaN(d.getTime())) return "";
+  return `${d.getDate()} de ${MESES[d.getMonth()].toLowerCase()} de ${d.getFullYear()}`;
+}
+
+function ResenaRealCard({ resena }: { resena: ResenaReal }) {
+  const inicial = (resena.autor_nombre?.charAt(0) ?? "C").toUpperCase();
+  return (
+    <div
+      className="rounded-xl p-5 border flex flex-col gap-3"
+      style={{ borderColor: "#F3F4F6", backgroundColor: "#FAFAFA", fontFamily: "var(--font-poppins)" }}
+    >
+      <div className="flex items-center gap-3">
+        <div
+          className="w-10 h-10 rounded-full flex items-center justify-center text-sm font-bold flex-shrink-0"
+          style={{ backgroundColor: "#FFF0E6", color: "#E8731A" }}
+        >
+          {inicial}
+        </div>
+        <div className="flex-1 min-w-0">
+          <p className="text-sm font-semibold text-gray-800 truncate">{resena.autor_nombre}</p>
+          <p className="text-[11px] text-gray-400">{formatearFechaResena(resena.created_at)}</p>
+        </div>
+      </div>
+
+      <StarRating rating={resena.puntuacion} size={13} />
+
+      {resena.comentario && resena.comentario.trim() && (
+        <p className="text-sm text-gray-600 leading-relaxed italic">
+          &ldquo;{resena.comentario}&rdquo;
+        </p>
+      )}
+    </div>
+  );
+}
+
+/* ─────────────────────────────────────────────
+   Selector de estrellas (1-5) para el formulario
+───────────────────────────────────────────── */
+function SelectorEstrellas({
+  value,
+  onChange,
+  disabled,
+}: {
+  value: number;
+  onChange: (v: number) => void;
+  disabled?: boolean;
+}) {
+  const [hover, setHover] = useState(0);
+  const activa = hover || value;
+
+  return (
+    <div className="flex items-center gap-1.5">
+      {[1, 2, 3, 4, 5].map((n) => {
+        const llena = activa >= n;
+        return (
+          <button
+            key={n}
+            type="button"
+            disabled={disabled}
+            onClick={() => onChange(n)}
+            onMouseEnter={() => setHover(n)}
+            onMouseLeave={() => setHover(0)}
+            className="transition-transform hover:scale-110 disabled:cursor-not-allowed"
+            aria-label={`${n} ${n === 1 ? "estrella" : "estrellas"}`}
+            style={{ color: llena ? "#E8731A" : "#D1D5DB" }}
+          >
+            <svg width="28" height="28" viewBox="0 0 24 24" fill="currentColor">
+              <polygon points="12,2 15.09,8.26 22,9.27 17,14.14 18.18,21.02 12,17.77 5.82,21.02 7,14.14 2,9.27 8.91,8.26" />
+            </svg>
+          </button>
+        );
+      })}
+      {value > 0 && (
+        <span className="ml-2 text-sm font-semibold text-gray-600" style={{ fontFamily: "var(--font-poppins)" }}>
+          {value} / 5
+        </span>
+      )}
+    </div>
+  );
+}
+
+/* ─────────────────────────────────────────────
+   Formulario para dejar una reseña
+───────────────────────────────────────────── */
+function FormularioResena({
+  proveedorId,
+  onResenaCreada,
+}: {
+  proveedorId: string;
+  onResenaCreada: (resena: ResenaReal) => void;
+}) {
+  const [puntuacion, setPuntuacion] = useState(0);
+  const [comentario, setComentario] = useState("");
+  const [enviando, setEnviando]     = useState(false);
+  const [error, setError]           = useState<string | null>(null);
+
+  async function handleSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    setError(null);
+
+    if (puntuacion < 1 || puntuacion > 5) {
+      setError("Elegí una puntuación de 1 a 5 estrellas.");
+      return;
+    }
+
+    setEnviando(true);
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) {
+        setError("Tu sesión expiró. Iniciá sesión de nuevo para dejar la reseña.");
+        return;
+      }
+
+      const { data: inserted, error: insertError } = await supabase
+        .from("resenas")
+        .insert({
+          proveedor_id: proveedorId,
+          usuario_id:   user.id,
+          puntuacion,
+          comentario:   comentario.trim() || null,
+        })
+        .select("id, puntuacion, comentario, created_at, usuario_id")
+        .single();
+
+      if (insertError) {
+        // Postgres 23505 = unique violation (el UNIQUE de la tabla)
+        if (insertError.code === "23505") {
+          setError("Ya dejaste una reseña para este proveedor.");
+        } else {
+          console.error("[FormularioResena] insert:", insertError);
+          setError("No se pudo enviar la reseña. Intentá de nuevo.");
+        }
+        return;
+      }
+
+      /* Obtener el nombre del autor para mostrarla en la lista */
+      const { data: prof } = await supabase
+        .from("profiles_publico")
+        .select("Nombre")
+        .eq("ID", user.id)
+        .single();
+
+      onResenaCreada({
+        id:           inserted.id,
+        puntuacion:   inserted.puntuacion,
+        comentario:   inserted.comentario,
+        created_at:   inserted.created_at,
+        autor_id:     inserted.usuario_id,
+        autor_nombre: (prof as { Nombre?: string } | null)?.Nombre ?? "Cliente",
+      });
+    } catch (err) {
+      console.error("[FormularioResena] error inesperado:", err);
+      setError("Ocurrió un error. Probá de nuevo.");
+    } finally {
+      setEnviando(false);
+    }
+  }
+
+  return (
+    <form
+      onSubmit={handleSubmit}
+      className="rounded-2xl border p-5 flex flex-col gap-4"
+      style={{ borderColor: "#F0E0D0", backgroundColor: "#FFFAF6", fontFamily: "var(--font-poppins)" }}
+    >
+      <div>
+        <h3 className="text-base font-bold text-gray-800">Dejá tu reseña</h3>
+        <p className="text-xs text-gray-500 mt-1">
+          Compartí tu experiencia para ayudar a otros organizadores.
+        </p>
+      </div>
+
+      {/* Selector de puntuación */}
+      <div className="flex flex-col gap-1.5">
+        <label className="text-xs font-semibold text-gray-700">Puntuación</label>
+        <SelectorEstrellas value={puntuacion} onChange={setPuntuacion} disabled={enviando} />
+      </div>
+
+      {/* Comentario */}
+      <div className="flex flex-col gap-1.5">
+        <label className="text-xs font-semibold text-gray-700">
+          Comentario <span className="text-gray-400 font-normal">(opcional)</span>
+        </label>
+        <textarea
+          rows={3}
+          value={comentario}
+          onChange={(e) => setComentario(e.target.value)}
+          placeholder="Contales a otros cómo fue tu experiencia..."
+          disabled={enviando}
+          className="w-full px-4 py-3 rounded-xl border text-sm outline-none transition-colors bg-white resize-none"
+          style={{ borderColor: "#E5E7EB" }}
+          onFocus={(e) => { e.currentTarget.style.borderColor = "#E8731A"; }}
+          onBlur={(e)  => { e.currentTarget.style.borderColor = "#E5E7EB"; }}
+        />
+      </div>
+
+      {/* Error */}
+      {error && (
+        <div className="px-3 py-2 rounded-lg text-xs flex items-center gap-2" style={{ backgroundColor: "#FEE2E2", color: "#B91C1C" }}>
+          <IconAlert />
+          <span>{error}</span>
+        </div>
+      )}
+
+      {/* Submit */}
+      <button
+        type="submit"
+        disabled={enviando}
+        className="cta-button self-end px-6 py-2.5 rounded-xl text-white font-semibold text-sm disabled:opacity-70 disabled:cursor-not-allowed"
+      >
+        {enviando ? "Enviando..." : "Enviar reseña"}
+      </button>
+    </form>
   );
 }
 
@@ -1138,7 +1382,6 @@ export default function PerfilClient({
   nombreCategoria: string;
 }) {
   const incluye = INCLUYE_POR_CATEGORIA[proveedor.categoria] ?? [];
-  const resenas = pickResenas(proveedor.id, 3);
 
   /* Estado compartido de fecha */
   const [fechaSeleccionada, setFechaSeleccionada] = useState<string | null>(null);
@@ -1146,6 +1389,97 @@ export default function PerfilClient({
   const [modalAbierto, setModalAbierto]           = useState(false);
   /* Fechas bloqueadas por reservas hechas en esta sesión */
   const [fechasReservadas, setFechasReservadas]   = useState<string[]>([]);
+
+  /* ─── Sistema de reseñas — mock vs real ─── */
+  const provUuid = uuidOrNull(proveedor.id);
+  const esMock   = provUuid === null;
+
+  /* Reseñas mock: pre-cargadas, no se modifican */
+  const resenasMock = esMock ? pickResenas(proveedor.id, 3) : [];
+
+  /* Reseñas reales: cargadas desde Supabase */
+  const [resenasReales,    setResenasReales]    = useState<ResenaReal[]>([]);
+  const [cargandoResenas,  setCargandoResenas]  = useState<boolean>(!esMock);
+  const [usuarioActualId,  setUsuarioActualId]  = useState<string | null>(null);
+
+  /* Promedio y count en tiempo real (sin tocar la view de Supabase) */
+  const ratingPromedio = resenasReales.length === 0
+    ? null
+    : resenasReales.reduce((acc, r) => acc + r.puntuacion, 0) / resenasReales.length;
+
+  const yaDejoResena = usuarioActualId !== null &&
+    resenasReales.some((r) => r.autor_id === usuarioActualId);
+
+  /* Carga inicial de reseñas reales (solo si el proveedor es real) */
+  useEffect(() => {
+    if (esMock || !provUuid) {
+      setCargandoResenas(false);
+      return;
+    }
+
+    let cancelado = false;
+
+    (async () => {
+      setCargandoResenas(true);
+      try {
+        // 1. Reseñas del proveedor
+        const { data: resenasData, error: resenasErr } = await supabase
+          .from("resenas")
+          .select("id, puntuacion, comentario, created_at, usuario_id")
+          .eq("proveedor_id", provUuid)
+          .order("created_at", { ascending: false });
+
+        if (cancelado) return;
+
+        if (resenasErr) {
+          console.error("[PerfilClient] cargar reseñas:", resenasErr);
+          setResenasReales([]);
+          return;
+        }
+
+        // 2. Resolver nombres de los autores vía profiles_publico
+        const autorIds = [...new Set((resenasData ?? []).map((r) => r.usuario_id as string))];
+        const nombreMap = new Map<string, string>();
+
+        if (autorIds.length > 0) {
+          const { data: profs } = await supabase
+            .from("profiles_publico")
+            .select("ID, Nombre")
+            .in("ID", autorIds);
+          (profs ?? []).forEach((p: { ID: string; Nombre: string | null }) => {
+            nombreMap.set(p.ID, p.Nombre ?? "Cliente");
+          });
+        }
+
+        if (cancelado) return;
+
+        const completas: ResenaReal[] = (resenasData ?? []).map((r) => ({
+          id:           r.id as number,
+          puntuacion:   r.puntuacion as number,
+          comentario:   r.comentario as string | null,
+          created_at:   r.created_at as string,
+          autor_id:     r.usuario_id as string,
+          autor_nombre: nombreMap.get(r.usuario_id as string) ?? "Cliente",
+        }));
+
+        setResenasReales(completas);
+
+        // 3. Saber quién es el usuario actual (para mostrar formulario o no)
+        const { data: { user } } = await supabase.auth.getUser();
+        if (cancelado) return;
+        setUsuarioActualId(user?.id ?? null);
+      } finally {
+        if (!cancelado) setCargandoResenas(false);
+      }
+    })();
+
+    return () => { cancelado = true; };
+  }, [esMock, provUuid]);
+
+  /* Cuando se agrega una nueva reseña vía el formulario, la prependemos */
+  function handleResenaCreada(nueva: ResenaReal) {
+    setResenasReales((prev) => [nueva, ...prev]);
+  }
 
   /* Datos de contacto del proveedor — visibles SOLO si el organizador
      logueado tiene al menos una reserva confirmada con este proveedor */
@@ -1279,13 +1613,31 @@ export default function PerfilClient({
                 {proveedor.ubicacion}
               </div>
 
-              <StarRating rating={proveedor.rating} />
+              {/* Rating del header:
+                  - Mock: muestra el rating hardcodeado del proveedor.
+                  - Real con reseñas: muestra el rating promedio real.
+                  - Real sin reseñas: muestra el badge "Nuevo" en lugar de estrellas vacías. */}
+              {esMock ? (
+                <StarRating rating={proveedor.rating} />
+              ) : ratingPromedio !== null ? (
+                <StarRating rating={ratingPromedio} />
+              ) : (
+                <span
+                  className="self-start px-2.5 py-0.5 rounded-full text-[11px] font-semibold"
+                  style={{ backgroundColor: "#FFF3E0", color: "#E8731A", fontFamily: "var(--font-poppins)" }}
+                >
+                  Nuevo
+                </span>
+              )}
 
-              <div className="flex items-center gap-1.5 text-gray-400 text-xs"
-                style={{ fontFamily: "var(--font-poppins)" }}>
-                <IconCheck />
-                <span>{proveedor.eventosRealizados} eventos realizados</span>
-              </div>
+              {/* "Eventos realizados" solo tiene sentido para mocks (no hay tracking real todavía) */}
+              {esMock && proveedor.eventosRealizados > 0 && (
+                <div className="flex items-center gap-1.5 text-gray-400 text-xs"
+                  style={{ fontFamily: "var(--font-poppins)" }}>
+                  <IconCheck />
+                  <span>{proveedor.eventosRealizados} eventos realizados</span>
+                </div>
+              )}
 
               <div className="flex flex-wrap gap-2 mt-1">
                 {proveedor.especialidades.map((esp) => (
@@ -1446,44 +1798,136 @@ export default function PerfilClient({
               </section>
             )}
 
-            {/* ── Sección 5: Reseñas verificadas ── */}
+            {/* ── Sección 5: Reseñas ── */}
             <section className="py-10 border-b border-gray-100">
-              <div className="flex flex-col sm:flex-row sm:items-end sm:justify-between gap-3 mb-6">
-                <div>
-                  <h2 className="text-xl font-bold text-gray-800 mb-1" style={{ fontFamily: "var(--font-poppins)" }}>
-                    Reseñas verificadas
-                  </h2>
-                  <p className="text-xs text-gray-400" style={{ fontFamily: "var(--font-poppins)" }}>
-                    Solo clientes que reservaron por PLANIT pueden dejar reseñas
-                  </p>
-                </div>
-                <div className="flex items-center gap-3 flex-shrink-0">
-                  <div className="flex flex-col items-end">
-                    <span className="text-2xl font-bold" style={{ fontFamily: "var(--font-poppins)", color: "#E8731A" }}>
-                      {proveedor.rating.toFixed(1)}
-                    </span>
-                    <span className="text-[10px] text-gray-400" style={{ fontFamily: "var(--font-poppins)" }}>
-                      {proveedor.eventosRealizados} reseñas
-                    </span>
+              {esMock ? (
+                /* ═══════ Versión MOCK: reseñas simuladas + etiqueta ═══════ */
+                <>
+                  <div className="flex flex-col sm:flex-row sm:items-end sm:justify-between gap-3 mb-6">
+                    <div>
+                      <h2 className="text-xl font-bold text-gray-800 mb-1" style={{ fontFamily: "var(--font-poppins)" }}>
+                        Reseñas
+                      </h2>
+                      <p className="text-xs text-gray-400" style={{ fontFamily: "var(--font-poppins)" }}>
+                        Perfil de muestra — las reseñas son simuladas
+                      </p>
+                    </div>
+                    <div className="flex items-center gap-3 flex-shrink-0">
+                      <div className="flex flex-col items-end">
+                        <span className="text-2xl font-bold" style={{ fontFamily: "var(--font-poppins)", color: "#E8731A" }}>
+                          {proveedor.rating.toFixed(1)}
+                        </span>
+                        <span className="text-[10px] text-gray-400" style={{ fontFamily: "var(--font-poppins)" }}>
+                          {proveedor.eventosRealizados} reseñas
+                        </span>
+                      </div>
+                      <StarRating rating={proveedor.rating} size={18} />
+                    </div>
                   </div>
-                  <StarRating rating={proveedor.rating} size={18} />
-                </div>
-              </div>
 
-              <div className="grid gap-4 sm:grid-cols-2">
-                {resenas.map((r, i) => (
-                  <ResenaCard key={i} resena={r} />
-                ))}
-              </div>
+                  <div className="grid gap-4 sm:grid-cols-2">
+                    {resenasMock.map((r, i) => (
+                      <ResenaCard key={i} resena={r} mostrarEtiquetaMuestra />
+                    ))}
+                  </div>
+                </>
+              ) : (
+                /* ═══════ Versión REAL: tabla resenas en Supabase ═══════ */
+                <>
+                  <div className="flex flex-col sm:flex-row sm:items-end sm:justify-between gap-3 mb-6">
+                    <div>
+                      <h2 className="text-xl font-bold text-gray-800 mb-1" style={{ fontFamily: "var(--font-poppins)" }}>
+                        Reseñas
+                      </h2>
+                      <p className="text-xs text-gray-400" style={{ fontFamily: "var(--font-poppins)" }}>
+                        {resenasReales.length === 0
+                          ? "Compartí tu experiencia y ayudá a otros"
+                          : `${resenasReales.length} ${resenasReales.length === 1 ? "reseña" : "reseñas"} de clientes`}
+                      </p>
+                    </div>
+                    {ratingPromedio !== null && (
+                      <div className="flex items-center gap-3 flex-shrink-0">
+                        <div className="flex flex-col items-end">
+                          <span className="text-2xl font-bold" style={{ fontFamily: "var(--font-poppins)", color: "#E8731A" }}>
+                            {ratingPromedio.toFixed(1)}
+                          </span>
+                          <span className="text-[10px] text-gray-400" style={{ fontFamily: "var(--font-poppins)" }}>
+                            {resenasReales.length} {resenasReales.length === 1 ? "reseña" : "reseñas"}
+                          </span>
+                        </div>
+                        <StarRating rating={ratingPromedio} size={18} />
+                      </div>
+                    )}
+                  </div>
 
-              <div className="mt-5 text-center">
-                <button
-                  className="text-xs font-semibold underline transition-opacity hover:opacity-70"
-                  style={{ fontFamily: "var(--font-poppins)", color: "#E8731A" }}
-                >
-                  Ver las {proveedor.eventosRealizados} reseñas
-                </button>
-              </div>
+                  {/* Listado o vacío */}
+                  {cargandoResenas ? (
+                    <div className="flex flex-col items-center justify-center py-10 text-sm text-gray-400 gap-2">
+                      <div className="w-6 h-6 border-2 border-orange-200 border-t-orange-500 rounded-full animate-spin" />
+                      Cargando reseñas...
+                    </div>
+                  ) : resenasReales.length === 0 ? (
+                    <div
+                      className="rounded-xl border p-6 text-center"
+                      style={{ borderColor: "#F3F4F6", backgroundColor: "#FAFAFA", fontFamily: "var(--font-poppins)" }}
+                    >
+                      <p className="text-sm text-gray-500">
+                        Aún no hay reseñas para este proveedor.
+                      </p>
+                      {usuarioActualId && !yaDejoResena && (
+                        <p className="text-xs text-gray-400 mt-1">
+                          ¡Sé el primero en dejar una!
+                        </p>
+                      )}
+                    </div>
+                  ) : (
+                    <div className="grid gap-4 sm:grid-cols-2">
+                      {resenasReales.map((r) => (
+                        <ResenaRealCard key={r.id} resena={r} />
+                      ))}
+                    </div>
+                  )}
+
+                  {/* Formulario / estados de "ya dejaste" / "iniciá sesión" */}
+                  <div className="mt-6">
+                    {!cargandoResenas && usuarioActualId && !yaDejoResena && (
+                      <FormularioResena
+                        proveedorId={provUuid!}
+                        onResenaCreada={handleResenaCreada}
+                      />
+                    )}
+
+                    {!cargandoResenas && usuarioActualId && yaDejoResena && (
+                      <div
+                        className="rounded-xl border p-4 flex items-center gap-3"
+                        style={{ borderColor: "#BBF7D0", backgroundColor: "#F0FDF4", fontFamily: "var(--font-poppins)" }}
+                      >
+                        <span
+                          className="w-8 h-8 rounded-full flex items-center justify-center flex-shrink-0"
+                          style={{ backgroundColor: "#DCFCE7", color: "#15803D" }}
+                        >
+                          <IconCheck size={14} />
+                        </span>
+                        <p className="text-sm text-gray-700">
+                          Ya dejaste una reseña para este proveedor.
+                        </p>
+                      </div>
+                    )}
+
+                    {!cargandoResenas && !usuarioActualId && (
+                      <div
+                        className="rounded-xl border p-4 text-sm text-gray-500 text-center"
+                        style={{ borderColor: "#F0E0D0", backgroundColor: "#FFFAF6", fontFamily: "var(--font-poppins)" }}
+                      >
+                        <Link href="/cuenta" className="font-semibold underline" style={{ color: "#E8731A" }}>
+                          Iniciá sesión
+                        </Link>{" "}
+                        para dejar una reseña.
+                      </div>
+                    )}
+                  </div>
+                </>
+              )}
             </section>
 
             {/* ── Sección 6: Calendario ── */}
